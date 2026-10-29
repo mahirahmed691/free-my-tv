@@ -4,7 +4,8 @@
     python3 scripts/tv_type.py 192.168.0.4 "https://example.com/apps.json"          # make type TEXT="..."
     python3 scripts/tv_type.py 192.168.0.4 "Wirral" --enter                          # then press Enter
 
-Open the field on the TV first (its keyboard showing). It uses the TV's remote control API (port 3000, as
+Open the field on the TV first, with OK, so its on-screen keyboard shows: the TV accepts the text either way, but it
+only lands while that keyboard is up. It uses the TV's remote control API (port 3000, as
 webos/apps.py and LG's phone app do) with only the typing permission: the TV asks once to allow it, and the key it
 gives back is kept in ~/.ssh/freemytv_ssap_type_<IP>.
 """
@@ -62,6 +63,8 @@ def main():
         if '--enter' in sys.argv:
             request(ws, 'ssap://com.webos.service.ime/sendEnterKey', {}, 'enter')
         print('Typed %d characters on the TV%s.' % (len(text), ' and pressed Enter' if '--enter' in sys.argv else ''))
+        # The TV says yes even when no field is listening: the text only lands while its on-screen keyboard is up.
+        print('Nothing there? Select the field with OK so the TV\'s keyboard shows, then run it again.')
     except socket.timeout:
         sys.exit('No answer from the TV: was the Allow prompt on the TV missed?')
     finally:
