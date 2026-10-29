@@ -386,6 +386,7 @@
   function renderGreeting() {
     var names = CONFIG.greeting, h = new Date().getHours();
     var text = !names ? tr('For You')
+      : Islam.on() && Islam.greeting(names, Date.now()) ? Islam.greeting(names, Date.now())
       : h < 5 ? trf('Good night, {names}', {names: names})
       : h < 12 ? trf('Good morning, {names}', {names: names})
       : h < 17 ? trf('Good afternoon, {names}', {names: names})
@@ -450,6 +451,10 @@
   function renderExtras(q) {
     var warn = devModeWarning();
     if (warn) chip(q, 'warn', '', warn);
+    if (Islam.on()) {
+      var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude());
+      if (p) chip(q, 'prayer', p.name, Data.time(p.at) + '  ·  ' + Islam.hijri(new Date()).text);
+    }
     var foot = footballLine();
     if (foot && foot[2]) chip(q, foot[1] === 'late' ? 'live' : 'match', foot[1] === 'late' ? tr('Live') : tr('Match'), foot[0]);
     // Today's events still to come: all-day ones first, then up to three by time.
@@ -573,12 +578,20 @@
   function renderClock() {
     var d = new Date(), c = $('clock');
     c.firstChild.textContent = formatDate('format|h:mm', d.getTime());
-    c.lastChild.textContent = formatDate('format|EEEE, MMMM d', d.getTime());
+    c.lastChild.textContent = formatDate('format|EEEE, MMMM d', d.getTime()) + (Islam.on() ? '  ·  ' + Islam.hijri(d).text : '');
   }
 
   /** On the minute, so the clock never runs late (the 30-second refresh could, by up to 30 s). */
+  var prayerShown = '';
+
   function tickClock() {
     renderClock();
+    // The prayer chip moves on when its time comes, and the Hijri date at midnight, without new data.
+    if (Islam.on()) {
+      var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude()), now = (p ? p.at : '') + new Date().toDateString();
+      if (prayerShown && now !== prayerShown) renderQuotes();
+      prayerShown = now;
+    }
     setTimeout(tickClock, 60000 - Date.now() % 60000 + 50);
   }
 
