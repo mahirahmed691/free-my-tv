@@ -12,6 +12,8 @@ import { eventsBetween, dayBounds } from './ics.js';
  *   GET /v1/notes       the note shown on the TV; POST {"text"} or DELETE it with ADMIN_TOKEN (make note)
  *   GET /v1/football    FOOTBALL_TEAM's live match, next fixture and last result (football-data.org, 5 min cache)
  *   GET /v1/calendar    today's events from CALENDAR_ICS (a calendar's secret iCal address; 10 min cache)
+ *   GET /v1/salah       today's adhan and jamaat at your mosque, as it publishes them (SALAH_WIDGET, its ConnectMazjid
+ *                       widget, as Sakinah's hall display reads it; 30 min cache, never past midnight)
  *   GET /webos/apps.json, /webos/FreeMyTV.ipk   a private Homebrew Channel repository (make release uploads both to KV):
  *                       no token (the Channel can't send one), so only from ALLOWED_IPS, and never without it
  *   GET /health     each source's last fetch, for the TV's About screen and a monitor (no token: nothing private)
@@ -20,7 +22,7 @@ import { eventsBetween, dayBounds } from './ics.js';
  * monitoring Workers' sites.
  *
  * Secrets: TV_TOKEN, ADMIN_TOKEN (writes the note, one per device, comma separated; never on the TV), UKHO_KEY, GITHUB_TOKEN (fine-grained, read-only),
- * FOOTBALL_KEY (football-data.org), CALENDAR_ICS (the calendar's secret iCal address: anyone with it reads the calendar). Vars: STATIONS ("0451:Mersey,0461:Dee"), ALLOWED_IPS (addresses or CIDR ranges, comma
+ * FOOTBALL_KEY (football-data.org), SALAH_WIDGET (the mosque's widget address, with its token), CALENDAR_ICS (the calendar's secret iCal address: anyone with it reads the calendar). Vars: STATIONS ("0451:Mersey,0461:Dee"), ALLOWED_IPS (addresses or CIDR ranges, comma
  * separated; empty = any), GITHUB_RECENT (how many recently pushed repos, 6).
  * /v1/dashboard holds counts only, never repo names or titles: the TV's card is on a shared screen.
  */
@@ -300,6 +302,58 @@ async function trains(env) {
   };
 }
 
+/** Milliseconds until the next midnight in tz (at least a minute). */
+function msToMidnight(t, tz) {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23' }).formatToParts(new Date(t));
+  const get = (type) => +parts.find((p) => p.type === type).value;
+  return Math.max(60000, ((24 - get('hour')) * 3600 - get('minute') * 60 - get('second')) * 1000);
+}
+
+// MARK: Salah (the mosque's ConnectMazjid widget: a Next.js page whose data carries each prayer's times)
+
+const SALAH_FRESH = 30 * 60000;
+const SALAH_KEYS = { Fajr: 'fajr', Sunrise: 'sunrise', Dhuhr: 'dhuhr', Asar: 'asr', Asr: 'asr', Maghrib: 'maghrib', Isha: 'isha' };
+
+/** The day in tz as YYYY-MM-DD. */
+export function localDay(t, tz) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+}
+
+/** "01:30 PM" as "13:30" ('' when it isn't a clock). */
+function clock24(value) {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(value || '').trim());
+  if (!m || +m[1] < 1 || +m[1] > 12) return '';
+  const h = (+m[1] % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
+/** {masjid, day, hijri, times: {fajr: {adhan, iqamah}, sunrise: {adhan}, ...} (ms), jumuah: "13:00"} from the page. */
+export function parseSalah(html, jumuahOverride = '') {
+  const text = html.replace(/\\"/g, '"');
+  const times = {};
+  const item = /\{"name":"(\w+)","icon"[\s\S]{0,1600}?"rawAzanTime":(\d+),"rawIqamaTime":(\d+),"isNotOffered":(true|false)/g;
+  for (const m of text.matchAll(item)) {
+    const key = SALAH_KEYS[m[1]];
+    if (!key || times[key] || m[4] === 'true') continue;
+    times[key] = { adhan: +m[2] * 1000 };
+    if (+m[3] > 0) times[key].iqamah = +m[3] * 1000;
+  }
+  for (const k of ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']) if (!times[k]) throw new Error(`no ${k} on the mosque's page`);
+  const field = (name) => (new RegExp(`"${name}":"([^"]{1,80})"`).exec(text) || [])[1] || '';
+  const jumuah = /"name":"Jum(?:m|u'?)ah"[\s\S]{0,240}?"prayerTime":"([^"]+)"/.exec(text);
+  const tz = field('timezone') || 'Europe/London';
+  return {
+    masjid: field('masjidName'), timezone: tz, day: localDay(times.dhuhr.adhan, tz), hijri: field('hijriDate'),
+    times, jumuah: jumuahOverride || (jumuah ? clock24(jumuah[1]) : ''),
+  };
+}
+
+async function salah(env) {
+  const r = await fetch(env.SALAH_WIDGET, { headers: { 'User-Agent': 'freemytv-bff' } });
+  if (!r.ok) throw new Error(`mosque widget: HTTP ${r.status}`);
+  return parseSalah(await r.text(), env.JUMUAH || '');
+}
+
 // MARK: Football (football-data.org: one request, 7 days back to 14 ahead)
 
 const FOOTBALL_FRESH = 5 * 60000;
@@ -481,6 +535,14 @@ export default {
         if (!env.CALENDAR_ICS) return json({ error: 'no CALENDAR_ICS' }, 503);
         const c = await cached(env, 'calendar', CALENDAR_FRESH, () => calendar(env));
         return json({ ...c.data, fetchedAt: c.fetchedAt, stale: c.stale, error: c.error });
+      }
+      if (path === '/v1/salah') {
+        if (!env.SALAH_WIDGET) return json({ error: 'no SALAH_WIDGET' }, 503);
+        // Never kept past the mosque's midnight: tomorrow's times are another page.
+        const tz = env.CALENDAR_TZ || 'Europe/London', now = Date.now();
+        const c = await cached(env, 'salah', Math.min(SALAH_FRESH, msToMidnight(now, tz)), () => salah(env));
+        const today = c.data.day === localDay(now, tz);
+        return json({ ...c.data, today, fetchedAt: c.fetchedAt, stale: c.stale || !today, error: c.error });
       }
       if (path === '/v1/trains') {
         const t = await live(env, 'trains', () => trains(env)).catch((e) => ({ error: String(e.message || e) }));

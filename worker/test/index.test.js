@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -442,4 +442,47 @@ test('homebrew repository: home only, no token, never without ALLOWED_IPS; 404 u
   assert.equal(ipk.status, 200);
   assert.equal(ipk.headers.get('Content-Length'), '3');
   assert.ok(JSON.stringify([...ipk.headers]).length < 2000);                       // the Channel's Node takes 8 KB of headers at most
+});
+
+// A page shaped like the mosque's ConnectMazjid widget (made up: the real one carries its token).
+const item = (name, adhan, iqamah, off = false) =>
+  `{\\"name\\":\\"${name}\\",\\"icon\\":[\\"$\\",\\"svg\\",null,{}],\\"azanTime\\":\\"x\\",\\"iqamaTime\\":\\"y\\",\\"rawAzanTime\\":${adhan},\\"rawIqamaTime\\":${iqamah},\\"isNotOffered\\":${off}}`;
+const SALAH_PAGE = `<script>self.__next_f.push([1,"17:[{\\"prayerTimes\\":[${[
+  item('Fajr', 1793253600, 1793254500), item('Sunrise', 1793257500, 0), item('Dhuhr', 1793278800, 1793279700),
+  item('Asar', 1793286000, 1793286900), item('Maghrib', 1793292480, 1793292780), item('Isha', 1793299500, 1793300400),
+].join(',')}],\\"hijriDate\\":\\"18 Jumada al-Ula, 1448\\",\\"timezone\\":\\"Europe/London\\",\\"specialTimings\\":[{\\"name\\":\\"Jummah\\",\\"khutbahTime\\":\\"01:30 PM\\",\\"prayerTime\\":\\"01:45 PM\\"}],\\"masjidName\\":\\"Wallasey Mosque\\"}]"])</script>`;
+
+test('parseSalah reads adhan and jamaat, the Hijri date and Jumu\'ah', () => {
+  const s = parseSalah(SALAH_PAGE);
+  assert.equal(s.masjid, 'Wallasey Mosque');
+  assert.equal(s.day, '2026-10-29');
+  assert.equal(s.hijri, '18 Jumada al-Ula, 1448');
+  assert.deepEqual(s.times.asr, { adhan: 1793286000000, iqamah: 1793286900000 });
+  assert.deepEqual(s.times.sunrise, { adhan: 1793257500000 });
+  assert.equal(s.jumuah, '13:45');
+  assert.equal(parseSalah(SALAH_PAGE, '13:00').jumuah, '13:00');
+  assert.throws(() => parseSalah('<html>nothing</html>'), /no fajr/);
+});
+
+test('localDay is the day in the mosque\'s time zone', () => {
+  assert.equal(localDay(Date.parse('2026-06-21T23:30:00Z'), 'Europe/London'), '2026-06-22');
+  assert.equal(localDay(Date.parse('2026-12-21T23:30:00Z'), 'Europe/London'), '2026-12-21');
+});
+
+test('/v1/salah needs the token and says when the page is not today\'s', async () => {
+  env.SALAH_WIDGET = 'https://widgets.example/prayer-timing?token=t';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => (String(url).startsWith('https://widgets.example') ? new Response(SALAH_PAGE) : realFetch(url));
+  try {
+    const no = await worker.fetch(new Request('https://w/v1/salah'), env);
+    assert.equal(no.status, 401);
+    const r = await worker.fetch(new Request('https://w/v1/salah', { headers: { Authorization: 'Bearer secret-token' } }), env);
+    const body = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(body.times.isha.iqamah, 1793300400000);
+    assert.equal(body.today, localDay(Date.now(), 'Europe/London') === '2026-10-29');
+    assert.equal(body.stale, !body.today);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

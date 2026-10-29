@@ -19,6 +19,8 @@ TRAINS_CRS = "BKQ"
 # football-data.org team id: Manchester United.
 FOOTBALL_TEAM = "66"
 CALENDAR_TZ = "Europe/London"
+# Jumu'ah jamaat at the mosque, when its widget is behind (Wallasey: 1:00 PM from 25 October 2026, as Sakinah has it).
+JUMUAH = "13:00"
 # Sites on the GitHub card: "Name:BINDING", each binding a monitoring Worker's STATE KV (read only here).
 SITES = "Sweet Dezire:SITE_SWEETDEZIRE,RAPIDER:SITE_RAPIDER"
 # Your other sites (mahirahmed.link), checked every 15 minutes by the cron below: "Name=https://url|...".

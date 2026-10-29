@@ -453,7 +453,12 @@
     if (warn) chip(q, 'warn', '', warn);
     if (Islam.on()) {
       var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude());
-      if (p) chip(q, 'prayer', p.name, Data.time(p.at) + '  ·  ' + Islam.hijri(new Date()).text);
+      if (p) {
+        // Its adhan, and the jamaat while it's still to come; once the adhan has gone, only the jamaat.
+        var when = p.at > Date.now() ? Data.time(p.at) : '';
+        if (p.iqamah) when += (when ? '  ·  ' : '') + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
+        chip(q, 'prayer', p.name, when + '  ·  ' + Islam.hijri(new Date()).text);
+      }
     }
     var foot = footballLine();
     if (foot && foot[2]) chip(q, foot[1] === 'late' ? 'live' : 'match', foot[1] === 'late' ? tr('Live') : tr('Match'), foot[0]);
@@ -588,7 +593,8 @@
     renderClock();
     // The prayer chip moves on when its time comes, and the Hijri date at midnight, without new data.
     if (Islam.on()) {
-      var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude()), now = (p ? p.at : '') + new Date().toDateString();
+      var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude());
+      var now = (p ? p.key + p.at + (p.at > Date.now()) : '') + new Date().toDateString();
       if (prayerShown && now !== prayerShown) renderQuotes();
       prayerShown = now;
     }

@@ -390,6 +390,24 @@ var Data = (function () {
     });
   }
 
+  var salah = null, salahAt = 0, fetchingSalah = false;
+
+  /** The mosque's adhan and jamaat for today (the Worker reads its published timetable). */
+  function refreshSalah() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.mosque || fetchingSalah || (now - salahAt < 10 * 60000 && now >= salahAt && salah && salah.today)) return;
+    fetchingSalah = true;
+    workerGet('/v1/salah', function (err, body) {
+      fetchingSalah = false;
+      if (!err && !(body && body.times)) err = new Error((body && body.error) || 'no times');
+      noteFetch('salah', err || (body.stale && body.error ? new Error(body.error) : null));
+      if (err) return;
+      salah = body;
+      salahAt = Date.now();
+      changed();
+    });
+  }
+
   var agenda = null, agendaAt = 0, fetchingAgenda = false;
 
   function refreshCalendar() {
@@ -757,12 +775,14 @@ var Data = (function () {
     appFor: appFor,
     usable: usable,
     services: services,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshFootball(); refreshCalendar(); },
+    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshFootball(); refreshCalendar(); refreshSalah(); },
     /** Today's events still to come or under way ([{title, start, end, allDay}]), or []. */
     get agenda() {
       var now = Date.now();
       return agenda ? agenda.events.filter(function (e) { return e.end > now; }) : [];
     },
+    /** The mosque's {masjid, day, hijri, times: {fajr: {adhan, iqamah}, ...}, jumuah}, or null. */
+    get salah() { return salah; },
     /** The team's {team, live, next, last} matches, or null. */
     get football() { return match; },
     /** The next departures ({station, services: [{std, etd, destination, cancelled}], messages}), or null. */
@@ -795,6 +815,7 @@ var Data = (function () {
       if (WORKER.url && WORKER.dashboard) out.push({name: 'GitHub', at: dashAt, failed: failures.dashboard});
       if (WORKER.url && WORKER.trains) out.push({name: trains ? trains.station : 'Trains', at: trainsAt, failed: failures.trains});
       if (WORKER.url && WORKER.football) out.push({name: match && match.team || 'Football', at: matchAt, failed: failures.football});
+      if (WORKER.url && WORKER.mosque) out.push({name: salah && salah.masjid || tr('Mosque'), at: salahAt, failed: failures.salah});
       if (WORKER.url && WORKER.calendar) out.push({name: tr('Calendar'), at: agendaAt, failed: failures.calendar});
       for (var i = 0; i < out.length; i++) if (out[i].failed && out[i].failed.at < out[i].at) out[i].failed = null;
       return out;

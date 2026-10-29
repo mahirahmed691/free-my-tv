@@ -89,8 +89,25 @@ var Islam = (function () {
     return hijriFormat.format(at).replace(/\s*(AH|هـ)$/, '');
   }
 
-  /** The Hijri date of the local day `day`: {day, month (1-12), year, text}. */
+  function ymd(day) {
+    var m = day.getMonth() + 1, d = day.getDate();
+    return day.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+  }
+
+  /** The mosque's published day (Data.salah) when it is `day`'s, else null. */
+  function mosque(day) {
+    var s = typeof Data !== 'undefined' && Data.salah;
+    return s && s.times && s.day === ymd(day) ? s : null;
+  }
+
+  /** The Hijri date of the local day `day`: {day, month (1-12), year, text}; the text is the mosque's when it has one. */
   function hijri(day) {
+    var h = calendarHijri(day), s = mosque(day);
+    if (s && s.hijri) h.text = s.hijri.replace(/,?\s*\d{4}\s*$/, '');
+    return h;
+  }
+
+  function calendarHijri(day) {
     var adjust = ((CONFIG.islam || {}).hijriAdjust | 0) * 86400000;
     var at = new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate(), 12) + adjust);
     if (hijriNumeric) {
@@ -111,19 +128,37 @@ var Islam = (function () {
   }
   var ORDER = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
 
-  /** The next time from now: {key, name, at}. In Ramadan Fajr is Suhoor's end and Maghrib Iftar; Friday's Dhuhr is Jumu'ah. */
+  /** `day`'s times as {key: {adhan, iqamah}}: the mosque's when it published that day, else worked out here. */
+  function dayTimes(day, lat, lon) {
+    var s = mosque(day), out = {}, k;
+    if (s) {
+      for (k in s.times) if (s.times.hasOwnProperty(k)) out[k] = {adhan: s.times[k].adhan, iqamah: s.times[k].iqamah || 0};
+      var j = /^(\d\d):(\d\d)$/.exec(s.jumuah || '');
+      if (j && day.getDay() === 5) {
+        var at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), +j[1], +j[2]).getTime();
+        out.dhuhr = {adhan: at, iqamah: at};
+      }
+      return out;
+    }
+    var t = times(day, lat, lon);
+    for (k in t) if (t.hasOwnProperty(k)) out[k] = {adhan: t[k], iqamah: 0};
+    return out;
+  }
+
+  /** The next prayer from now: {key, name, at (adhan), iqamah (0 if none)}, kept until its jamaat when the mosque has one.
+   * In Ramadan Fajr is Suhoor's end and Maghrib Iftar; Friday's Dhuhr is Jumu'ah. */
   function next(now, lat, lon) {
     var day = new Date(now), name = names();
     for (var i = 0; i < 2; i++) {
-      var t = times(day, lat, lon), ramadan = hijri(day).month === 9;
+      var t = dayTimes(day, lat, lon), ramadan = hijri(day).month === 9;
       for (var k = 0; k < ORDER.length; k++) {
         var key = ORDER[k];
-        if (t[key] <= now) continue;
+        if (!t[key] || Math.max(t[key].adhan, t[key].iqamah) <= now) continue;
         var label = name[key];
         if (ramadan && key === 'fajr') label = tr('Suhoor');
         else if (ramadan && key === 'maghrib') label = tr('Iftar');
         else if (key === 'dhuhr' && day.getDay() === 5) label = tr("Jumu'ah");
-        return {key: key, name: label, at: t[key]};
+        return {key: key, name: label, at: t[key].adhan, iqamah: t[key].iqamah !== t[key].adhan ? t[key].iqamah : 0};
       }
       day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
     }

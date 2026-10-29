@@ -72,7 +72,8 @@ def read_config(path):
                    'dashboard': values.get('dashboard', 'false').lower() == 'true', 'workHours': values.get('work_hours', ''),
                    'trains': values.get('trains', 'false').lower() == 'true', 'notes': values.get('notes', 'false').lower() == 'true',
                    'football': values.get('football', 'false').lower() == 'true',
-                   'calendar': values.get('calendar', 'false').lower() == 'true'},
+                   'calendar': values.get('calendar', 'false').lower() == 'true',
+                   'mosque': values.get('mosque', 'false').lower() == 'true'},
         # "Good evening, <greeting>" in place of "For You" (empty: "For You").
         'greeting': values.get('greeting', ''),
         # Prayer times and the Hijri date (web/islam.js): the method, Asr's shadow and a day's shift for a moon sighting.
