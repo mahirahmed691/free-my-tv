@@ -7,9 +7,11 @@ Writes the repository (upstream's format, tools/homebrew_repo.py) with ipkUrl on
 FreeMyTV-webos.ipk in the Worker's KV (webos:apps.json, webos:ipk). The Worker serves both only to ALLOWED_IPS: the
 build holds the TMDB key, the TV's Worker token and your photos, so it never goes anywhere public.
 """
+import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,8 +25,20 @@ ICON = 'https://freemytv.io/assets/icon-512.png'
 KV_MAX = 25 * 1024 * 1024
 
 
+def node_path():
+    """PATH with a Node 22+ first: wrangler needs it, and the shell's own node may be an older nvm one."""
+    path = os.environ.get('PATH', '')
+    try:
+        if int(subprocess.run(['node', '-v'], capture_output=True, text=True).stdout.strip().lstrip('v').split('.')[0]) >= 22:
+            return path
+    except (OSError, ValueError):
+        pass
+    found = sorted(glob.glob(os.path.expanduser('~/.nvm/versions/node/v2[2-9].*/bin')), key=lambda d: [int(x) for x in re.findall(r'\d+', d)])
+    return found[-1] + os.pathsep + path if found else path
+
+
 def kv_put(key, path):
-    env = dict(os.environ, WRANGLER_SEND_METRICS='false')
+    env = dict(os.environ, WRANGLER_SEND_METRICS='false', PATH=node_path())
     r = subprocess.run(['npx', '--yes', 'wrangler@4.150.0', 'kv', 'key', 'put', key, '--binding', 'CACHE', '--remote', '--path', path],
                        cwd=os.path.join(ROOT, 'worker'), capture_output=True, text=True, env=env)
     if r.returncode != 0:
