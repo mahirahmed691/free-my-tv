@@ -483,6 +483,12 @@
       if (p) {
         // Its adhan, and the jamaat while it's still to come; once the adhan has gone, only the jamaat.
         var when = p.at > Date.now() ? Data.time(p.at) : '';
+        // Suhoor's end and Iftar in Ramadan: how long is left, from three hours before.
+        var left = p.at - Date.now();
+        if ((p.key === 'fajr' || p.key === 'maghrib') && Islam.hijri(new Date()).month === 9 && left > 0 && left < 3 * 3600000) {
+          var mins = Math.ceil(left / 60000);
+          when += '  ·  ' + (mins >= 60 ? trf('in {h} h {m} min', {h: Math.floor(mins / 60), m: mins % 60}) : trf('in {m} min', {m: mins}));
+        }
         if (p.iqamah) when += (when ? '  ·  ' : '') + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
         chip(q, 'prayer', p.name, function (c) {
           c.appendChild(document.createTextNode(when + '  ·  '));
@@ -501,7 +507,7 @@
       for (e = 0; e < events.length && parts.length < 3; e++) if (!events[e].allDay) parts.push(Data.time(events[e].start) + ' ' + events[e].title);
       chip(q, 'agenda', tr('Today'), parts.join('  ·  '));
     }
-    if (Data.note) chip(q, 'note', tr('Note'), Data.note);
+    if (Data.note) chip(q, 'note', Data.noteFrom ? trf('From {name}', {name: Data.noteFrom}) : tr('Note'), Data.note);
     var lit = lights.filter(function (l) { return l.on; });
     if (lit.length && !movie) chip(q, 'lights', tr('Lights'), lit.length === lights.length && lights.length > 1 ? tr('All on')
       : lit.length > 2 ? trf('{n} on', {n: lit.length}) : trf('{names} on', {names: lit.map(function (l) { return l.name; }).join(', ')}));
@@ -544,6 +550,7 @@
 
   function renderCards() {
     var list = Data.picks(TAB_KIND[st.tab]);
+    if (ambient) prepareColours(list.map(function (p) { return p.backdrop ? Data.image(p.backdrop, 'w185') : ''; }));
     var holder = $('cards');
     setClass(body, 'no-picks', !list.length);
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
@@ -964,7 +971,34 @@
   // Ambient: the lights take the colours of what Free My TV shows (the focused pick, the screensaver's photo).
   // Two lights split the picture: the first its left half's colour, the second its right half's.
 
-  var ambient = null, ambientWant = null, ambientAt = 0, ambientTimer = 0, ambientUrl = '', colourCache = {};
+  var ambient = null, ambientWant = null, ambientAt = 0, ambientTimer = 0, ambientUrl = '', colourCache = {}, colourQueue = [];
+  // Each picture's colours are remembered (on the TV, across restarts): worked out once, ahead of time, so the lights
+  // change the moment a picture shows.
+  try { colourCache = JSON.parse(localStorage.getItem('fmtv.colours') || '{}') || {}; } catch (e) { colourCache = {}; }
+  var colourSave = 0;
+
+  function rememberColours() {
+    clearTimeout(colourSave);
+    colourSave = setTimeout(function () {
+      var keys = Object.keys(colourCache);
+      if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(function (k) { delete colourCache[k]; });
+      try { localStorage.setItem('fmtv.colours', JSON.stringify(colourCache)); } catch (e) {}
+    }, 2000);
+  }
+
+  /** Works out these pictures' colours one at a time in the background (only those not known yet). */
+  function prepareColours(urls) {
+    if (!ambient) return;
+    urls.forEach(function (u) { if (u && !colourCache[u] && colourQueue.indexOf(u) < 0) colourQueue.push(u); });
+    if (colourQueue.length && colourQueue.busy !== true) nextColour();
+  }
+
+  function nextColour() {
+    var u = colourQueue.shift();
+    if (!u) { colourQueue.busy = false; return; }
+    colourQueue.busy = true;
+    pictureColours(u, function () { setTimeout(nextColour, 150); });
+  }
 
   function ambientLights() {
     var names = (CONFIG.tapo && CONFIG.tapo.ambient) || [];
@@ -999,6 +1033,7 @@
           halves.push(hsv(r / sum, g / sum, b / sum));
         }
         colourCache[url] = halves;
+        rememberColours();
         done(halves);
       } catch (e) { done(null); }   // a picture the page may not read
     };
@@ -1013,14 +1048,16 @@
   }
 
   /** What the lights should show for this picture (only while ambient is on), at most every 3 s and only on a change. */
-  function ambientFrom(url) {
+  function ambientFrom(url, now) {
     if (!ambient || !url || url === ambientUrl) return;
     ambientUrl = url;
     pictureColours(url, function (halves) {
       if (!ambient || ambientUrl !== url || !halves) return;
       ambientWant = halves;
       clearTimeout(ambientTimer);
-      ambientTimer = setTimeout(applyAmbient, Math.max(600, 3000 - (Date.now() - ambientAt)));
+      // At once for the screensaver (it's timed to the fade); while scrolling, a short pause and at most one a second.
+      if (now) applyAmbient();
+      else ambientTimer = setTimeout(applyAmbient, Math.max(350, 1000 - (Date.now() - ambientAt)));
     });
   }
 
@@ -1053,6 +1090,7 @@
     ambient = picked.map(function (l) { return {on: l.on, brightness: l.brightness, temp: l.temp, hue: l.hue, sat: l.sat}; });
     Prefs.set('ambient', true);
     ambientFrom(currentPicture());
+    prepareColours(cards.map(function (p) { return p.backdrop ? Data.image(p.backdrop, 'w185') : ''; }));
   }
 
   function restoreLights(list, was) {
@@ -1104,6 +1142,42 @@
     setClass($('settings'), 'open', true);
     updateFocus();
     refreshLights(function () { if (st.zone === Z.SETTINGS && sheet === 'lights') renderSettings(); });
+  }
+
+  /** The TV powering off: the lights it set (movie mode, ambient) go off with it; the ones you turned on stay. */
+  if (CONFIG.tapo && CONFIG.tapo.offWithTv) {
+    TV.onPowerOff(function () {
+      var mine = movie ? lights : ambient ? ambientLights() : [];
+      movie = null;
+      mine.forEach(function (l) { setLight(l, {device_on: false}); });
+    });
+  }
+
+  /**
+   * At each adhan (the mosque's, else worked out): a banner here, the TV's own toast when another app is in front,
+   * and the lights that are on dip and come back (not in movie mode). CONFIG.islam.prayerAlert.
+   */
+  var alerted = '';
+
+  function prayerAlert() {
+    if (!(CONFIG.islam && CONFIG.islam.prayerAlert) || !Islam.on()) return;
+    var now = Date.now(), p = Islam.next(now - 90000, +Prefs.latitude(), +Prefs.longitude());
+    if (!p || p.key === 'sunrise' || p.at > now || now - p.at > 90000) return;
+    var key = p.key + new Date(p.at).toDateString();
+    if (alerted === key) return;
+    alerted = key;
+    var masjid = Data.salah && Data.salah.masjid;
+    var text = masjid ? trf('{prayer} at {mosque}', {prayer: p.name, mosque: masjid}) : trf('Time for {prayer}', {prayer: p.name});
+    if (p.iqamah) text += '  ·  ' + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
+    if (document.hidden) TV.notify(text); else toast(text);
+    if (movie) return;
+    ambientLights().forEach(function (l) {
+      if (!l.on || !l.ok) return;
+      var b = l.brightness || 50;
+      setLight(l, {brightness: Math.max(5, Math.round(b / 4))}, function () {
+        setTimeout(function () { setLight(l, {brightness: b}); }, 2500);
+      });
+    });
   }
 
   /** At Maghrib the lights that are on turn warm and soft, once (CONFIG.islam.prayerLights; the TV has to be on). */
@@ -1967,7 +2041,15 @@
       if (p) {
         back.style.backgroundImage = 'url(' + (p.own ? p.src : Data.image(p.backdrop, 'original')) + ')';
         saverUrl = p.own ? p.src : Data.image(p.backdrop, 'w185');
-        if (ambient) ambientFrom(saverUrl);
+        if (ambient) {
+          ambientFrom(saverUrl, true);   // with the fade, not after it
+          var ahead = [];
+          for (var n = 0; n < 3 && photos.length; n++) {
+            var q = photos[(saverIndex + n) % photos.length];
+            if (q) ahead.push(q.own ? q.src : Data.image(q.backdrop, 'w185'));
+          }
+          prepareColours(ahead);
+        }
         // Your photos whole, on black (a portrait one would be cropped to a band by cover); the picks fill the screen.
         back.style.backgroundSize = p.own ? 'contain' : '';
         back.style.backgroundColor = p.own ? '#000' : '';
@@ -2155,6 +2237,7 @@
     renderGreeting();
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
+    prayerAlert();
     if (!saverOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) showSaver();
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
   }, 30000);

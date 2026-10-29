@@ -166,10 +166,10 @@ function tapoRequest(ip, s, body, done) {
   });
 }
 
-/** One request to a light, with its session kept for 10 minutes (and one new handshake when it has gone). */
+/** One request to a light, its session kept while it's used (20 minutes idle), and one new handshake when it has gone. */
 function tapo(ip, auth, method, params, done, again) {
   var s = tapoSessions[ip];
-  if (!s || Date.now() - s.at > 600000) {
+  if (!s || Date.now() - s.at > 1200000) {
     return tapoHandshake(ip, auth, function (err, fresh) {
       if (err) return done(err);
       tapoSessions[ip] = fresh;
@@ -183,6 +183,7 @@ function tapo(ip, auth, method, params, done, again) {
     }
     if (err) return done(err);
     if (answer.error_code) return done(new Error('error ' + answer.error_code));
+    s.at = Date.now();
     done(null, answer.result || {});
   });
 }

@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList, parseSalah, localDay } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -251,6 +251,17 @@ test('notes: the TV reads; only ADMIN_TOKEN writes or clears; length and emptine
   assert.equal((await req('/v1/notes', { method: 'DELETE', token: 'admin-token' })).status, 200);
   assert.equal((await (await req('/v1/notes')).json()).text, '');
   assert.equal((await req('/v1/tides', { method: 'POST', token: 'admin-token' })).status, 405);           // only notes take writes
+});
+
+test('notes: a named key signs the note; an unnamed one leaves it unsigned', async () => {
+  env.ADMIN_TOKEN = 'mac-token, Mariam=her-token , Mahir=his-token';
+  const w = await req('/v1/notes', { method: 'POST', token: 'her-token', body: { text: 'Dinner at 7' } });
+  assert.equal((await w.json()).from, 'Mariam');
+  assert.equal((await (await req('/v1/notes')).json()).from, 'Mariam');
+  assert.equal((await (await req('/v1/notes', { method: 'POST', token: 'mac-token', body: { text: 'x' } })).json()).from, '');
+  assert.equal((await req('/v1/notes', { method: 'POST', token: 'Mariam=her-token', body: { text: 'x' } })).status, 401);
+  assert.equal(noteSender('Mariam=her-token', 'Bearer her-token'), 'Mariam');
+  assert.equal(noteSender('Mariam=her-token', 'Bearer his-token'), null);
 });
 
 test('notes: ALLOWED_IPS applies to writes too', async () => {

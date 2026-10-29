@@ -420,7 +420,7 @@ var TV = (function () {
   }
 
   // The browser preview's lights: remembered while the page is open.
-  var previewLights = {};
+  var previewLights = {}, powerBridge = null;
 
   function previewLight(ip, method, params, done) {
     var l = previewLights[ip] || (previewLights[ip] = {device_on: ip.slice(-1) === '1', brightness: 60, color_temp: 2700});
@@ -441,6 +441,31 @@ var TV = (function () {
 
     /** Whether the Tapo lights can be reached (LG's service makes the requests; the browser preview pretends). */
     canLights: webos || (!samsung && !webos),
+
+    /**
+     * done() when the TV starts to power off or go to standby (LG's power state: a "Request Power Off" or "Prepare
+     * Suspend" processing, or Active Standby / Suspend), once each time; it's back on with an Active state.
+     */
+    onPowerOff: function (done) {
+      if (!webos) return;
+      var bridge = new window.PalmServiceBridge(), off = false;
+      powerBridge = bridge;   // kept, or the subscription goes with it
+      bridge.onservicecallback = function (message) {
+        var m = null;
+        try { m = JSON.parse(message); } catch (e) {}
+        if (!m) return;
+        var going = /Power Off|Suspend|Standby/i.test(String(m.processing || '')) || /Standby|Suspend|Off/i.test(String(m.state || ''));
+        if (going && !off) { off = true; done(); } else if (!going && m.state === 'Active') off = false;
+      };
+      bridge.call('luna://com.webos.service.tvpower/power/getPowerState', JSON.stringify({subscribe: true}));
+    },
+
+    /** A message from the TV itself, over whatever app is in front (LG's toast); false where there's none. */
+    notify: function (text) {
+      if (!webos) return false;
+      luna('luna://com.webos.notification/createToast', {message: text, noaction: true});
+      return true;
+    },
 
     /** One request to a Tapo light (get_device_info or set_device_info): done(result or null). */
     light: function (ip, method, params, done) {

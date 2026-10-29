@@ -57,10 +57,16 @@ def workflow(actions, glyph, color):
 
 
 def main():
+    # A name (python3 scripts/make_shortcuts.py Mariam) builds that person's, with worker_phone_token_mariam, in
+    # out/shortcuts/Mariam; without one, the first phone's (worker_phone_token) in out/shortcuts.
+    who = sys.argv[1] if len(sys.argv) > 1 else ''
+    key = 'worker_phone_token' + ('_' + who.lower() if who else '')
+    secrets_only = tvconfig.read(tvconfig.SECRETS)
     values = tvconfig.settings()
-    url, token = values.get('worker_url', ''), values.get('worker_phone_token', '')
+    url, token = values.get('worker_url', ''), secrets_only.get(key, '')
     if not url or not token:
-        sys.exit('Needs worker_url in tv.properties and worker_phone_token in config.properties.')
+        sys.exit('Needs worker_url in tv.properties and %s in config.properties.' % key)
+    out = os.path.join(OUT, who) if who else OUT
     notes = url.rstrip('/') + '/v1/notes'
 
     ask = action('is.workflow.actions.ask', WFAskActionPrompt='Note for the TV (up to 140 characters)', WFInputType='Text')
@@ -69,11 +75,11 @@ def main():
     clear = request(notes, 'DELETE', token)
     cleared = action('is.workflow.actions.showresult', Text=output_of(clear['WFWorkflowActionParameters']['UUID'], 'Contents of URL'))
 
-    os.makedirs(OUT, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
     for name, flow in [('Note to TV', workflow([ask, send, shown], 59511, 4282601983)),
                        ('Clear TV note', workflow([clear, cleared], 59446, 4271458815))]:
-        raw = os.path.join(OUT, name + ' (unsigned).shortcut')
-        signed = os.path.join(OUT, name + '.shortcut')
+        raw = os.path.join(out, name + ' (unsigned).shortcut')
+        signed = os.path.join(out, name + '.shortcut')
         fd = os.open(raw, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'wb') as f:
             plistlib.dump(flow, f, fmt=plistlib.FMT_BINARY)
@@ -84,7 +90,8 @@ def main():
             sys.exit('Signing "%s" failed: %s' % (name, (result.stderr or result.stdout).strip()[:300]))
         os.chmod(signed, 0o600)
         print('Built', signed)
-    print('AirDrop both to the iPhone, add them, then delete out/shortcuts (they hold the phone\'s key).')
+    print('AirDrop both to %s iPhone, add them, then delete %s (they hold the phone\'s key).'
+          % (who + "'s" if who else 'the', os.path.relpath(out, os.path.dirname(OUT))))
 
 
 if __name__ == '__main__':

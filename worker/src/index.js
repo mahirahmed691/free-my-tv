@@ -21,7 +21,7 @@ import { eventsBetween, dayBounds } from './ics.js';
  * Every 15 minutes (cron) it also checks WATCH_SITES ("Name=https://url|..."), and the GitHub card counts them with the
  * monitoring Workers' sites.
  *
- * Secrets: TV_TOKEN, ADMIN_TOKEN (writes the note, one per device, comma separated; never on the TV), UKHO_KEY, GITHUB_TOKEN (fine-grained, read-only),
+ * Secrets: TV_TOKEN, ADMIN_TOKEN (writes the note, one per device, comma separated, "Name=token" to sign it; never on the TV), UKHO_KEY, GITHUB_TOKEN (fine-grained, read-only),
  * FOOTBALL_KEY (football-data.org), SALAH_WIDGET (the mosque's widget address, with its token), CALENDAR_ICS (the calendar's secret iCal address: anyone with it reads the calendar). Vars: STATIONS ("0451:Mersey,0461:Dee"), ALLOWED_IPS (addresses or CIDR ranges, comma
  * separated; empty = any), GITHUB_RECENT (how many recently pushed repos, 6).
  * /v1/dashboard holds counts only, never repo names or titles: the TV's card is on a shared screen.
@@ -406,12 +406,24 @@ async function calendar(env) {
 
 const NOTE_MAX = 140;
 
+/** Whose key this is ("Name=token" in ADMIN_TOKEN): the name, '' for an unnamed key, null for none of them. */
+export function noteSender(list, authorization) {
+  for (const entry of String(list || '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const eq = entry.indexOf('=');
+    const name = eq > 0 && eq < 40 ? entry.slice(0, eq).trim() : '';
+    const token = name ? entry.slice(eq + 1).trim() : entry;
+    if (token && sameSecret(authorization, 'Bearer ' + token)) return name;
+  }
+  return null;
+}
+
 async function notes(request, env) {
   if (request.method === 'GET') return json((await env.CACHE.get('note', 'json')) || { text: '', at: 0 });
-  // ADMIN_TOKEN may list several, comma separated: one per device (the Mac, a phone's Shortcut), so one can be revoked.
+  // ADMIN_TOKEN may list several, comma separated: one per device (the Mac, each phone's Shortcut), so one can be
+  // revoked. "Name=token" says whose it is, and the note says who wrote it.
   const admin = request.headers.get('Authorization') || '';
-  const tokens = (env.ADMIN_TOKEN || '').split(',').map((x) => x.trim()).filter(Boolean);
-  if (!tokens.some((t) => sameSecret(admin, 'Bearer ' + t))) return json({ error: 'admin token' }, 401);
+  const sender = noteSender(env.ADMIN_TOKEN, admin);
+  if (sender === null) return json({ error: 'admin token' }, 401);
   if (request.method === 'DELETE') {
     await env.CACHE.delete('note');
     return json({ text: '', at: 0 });
@@ -421,7 +433,7 @@ async function notes(request, env) {
   const text = String((body && body.text) || '').replace(/\s+/g, ' ').trim();
   if (!text) return json({ error: 'empty note' }, 400);
   if (text.length > NOTE_MAX) return json({ error: `at most ${NOTE_MAX} characters` }, 400);
-  const note = { text, at: Date.now() };
+  const note = { text, at: Date.now(), from: sender };
   await env.CACHE.put('note', JSON.stringify(note));
   return json(note);
 }

@@ -7,8 +7,8 @@
 #   make config-hash            the hash of the settings a build would use (secrets left out)
 #   make note MSG="..."         the note on the TV's home screen (through the Worker; no reinstall)
 #   make note-clear             remove it
-#   make revoke-phone           the phone's Shortcuts stop working (only the Mac's key is left)
-#   make new-phone-key          a fresh key for a phone, and its two Shortcuts rebuilt in out/shortcuts
+#   make revoke-phone [NAME=]   that phone's Shortcuts stop working (yours without NAME, NAME=Mariam hers)
+#   make new-phone-key [NAME=]  a fresh key for a phone (NAME=Mariam: hers), its two Shortcuts in out/shortcuts
 #   make type TEXT="..."        types into the text field open on the TV (ENTER=1 presses Enter after)
 # Settings are in tv.properties (tracked); the keys stay in config.properties (gitignored).
 # Roll back: git checkout tv-YYYY-MM-DD-N && make install (code and settings both come back; the keys are today's).
@@ -44,10 +44,10 @@ note-clear:
 	@$(PYTHON) scripts/note.py --clear
 
 revoke-phone:
-	@$(PYTHON) scripts/phone_key.py revoke
+	@$(PYTHON) scripts/phone_key.py revoke $(NAME)
 
 new-phone-key:
-	@$(PYTHON) scripts/phone_key.py new
+	@$(PYTHON) scripts/phone_key.py new $(NAME)
 
 type:
 	@test -n "$(TEXT)" || { echo 'Usage: make type TEXT="..." [ENTER=1] (with a text field open on the TV)'; exit 2; }

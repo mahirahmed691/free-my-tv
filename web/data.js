@@ -356,7 +356,7 @@ var Data = (function () {
 
   // MARK: - Trains and the note (the Worker: Huxley2's departures; the note make note writes)
 
-  var trains = null, trainsAt = 0, fetchingTrains = false, note = null, noteAt = 0, fetchingNote = false;
+  var trains = null, trainsAt = 0, fetchingTrains = false, note = null, noteFrom = '', noteAt = 0, fetchingNote = false;
 
   function workerGet(path, done) {
     get(WORKER.url.replace(/\/+$/, '') + path, {Authorization: 'Bearer ' + WORKER.token}, done);
@@ -438,8 +438,8 @@ var Data = (function () {
       noteFetch('note', err);
       if (err) return;
       noteAt = Date.now();
-      var text = body && body.text || '';
-      if (text !== (note || '')) { note = text; changed(); }
+      var text = body && body.text || '', from = body && body.from || '';
+      if (text !== (note || '') || from !== noteFrom) { note = text; noteFrom = from; changed(); }
     });
   }
 
@@ -793,6 +793,8 @@ var Data = (function () {
     get trains() { return trains; },
     /** The note from make note, or ''. */
     get note() { return note || ''; },
+    /** Who wrote it (the phone's name on the Worker), or ''. */
+    get noteFrom() { return noteFrom; },
     /** The GitHub counts while in work hours ({repos, builds, reviews, pullRequests, alerts}), else null. */
     get dashboard() { return WORKER.dashboard && inWorkHours(Date.now()) ? dash : null; },
     get dashboardAt() { return dashAt; },
