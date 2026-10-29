@@ -123,6 +123,18 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* MARK: - Title and tabs */
 
+#title .pets { display: inline-block; margin-left: 22px; vertical-align: -6px; white-space: nowrap; }
+#title .pet {
+  display: inline-block;
+  width: 70px;
+  height: 70px;
+  margin-right: -14px;
+  border-radius: 35px;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 0 4px #F5F5F7, 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+.night #title .pet { box-shadow: 0 0 0 4px #0B0B0D, 0 8px 22px rgba(0, 0, 0, 0.5); }
 #title {
   position: absolute;
   left: 76px;

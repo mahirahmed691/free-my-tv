@@ -391,7 +391,26 @@
       : h < 12 ? trf('Good morning, {names}', {names: names})
       : h < 17 ? trf('Good afternoon, {names}', {names: names})
       : trf('Good evening, {names}', {names: names});
-    if ($('title').textContent !== text) $('title').textContent = text;
+    var t = $('title').firstChild;
+    if (t.textContent !== text) t.textContent = text;
+    renderPets();
+  }
+
+  var petsShown = '';
+
+  /** Your pets' round photos after the greeting, a different photo of each every day (their names for TalkBack). */
+  function renderPets() {
+    var pets = CONFIG.pets || [], day = Math.floor(Date.now() / 86400000 - new Date().getTimezoneOffset() / 1440);
+    var faces = pets.map(function (p) { return p.faces[day % p.faces.length]; }), key = faces.join('|');
+    if (key === petsShown) return;
+    petsShown = key;
+    var box = $('title').lastChild;
+    box.innerHTML = '';
+    for (var i = 0; i < pets.length; i++) {
+      var face = el('span', 'pet', box);
+      face.style.backgroundImage = 'url(' + faces[i] + ')';
+      face.setAttribute('aria-label', pets[i].name);
+    }
   }
 
   function renderTop() {
@@ -1680,6 +1699,11 @@
   function saverPhotos() {
     var picks = Data.showcase().filter(function (p) { return p.backdrop && Data.usable(p.app); });
     var own = (CONFIG.photos || []).map(function (src) { return {own: true, src: src}; });
+    // Your pets' photos among yours, each named on the screensaver.
+    var pets = CONFIG.pets || [];
+    for (var i = 0; i < pets.length; i++) {
+      for (var j = 0; j < pets[i].photos.length; j++) own.splice(Math.min(own.length, (i + 1) * (j + 2)), 0, {own: true, src: pets[i].photos[j], pet: pets[i].name});
+    }
     if (!own.length) return picks;
     var mix = CONFIG.photosMix, perPick = mix === 'mine' || !picks.length ? Infinity : mix === 'mostly' ? 3 : 1;
     if (perPick === Infinity) return own;
@@ -1725,7 +1749,7 @@
         back.style.backgroundRepeat = p.own ? 'no-repeat' : '';
         back.style.backgroundPosition = p.own ? 'center' : '';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
-        clock.children[2].textContent = p.own ? '' : p.title;
+        clock.children[2].textContent = p.pet ? '🐾 ' + p.pet : p.own ? '' : p.title;
         saverPick = p.own ? null : p;   // your own photo: OK only closes, like any other key
         // With Watch from the screensaver on, OK opens this title's app (any other key only closes).
         var app = !p.own && Prefs.saverWatch() && Data.appFor(p.app);
