@@ -1,11 +1,12 @@
 /* Prayer times and the Hijri date, worked out on the TV from its place: nothing is fetched.
- * tv.properties: prayer=true, prayer_method (MWL, ISNA, Egypt, Makkah, Karachi), asr (standard or hanafi) and
+ * tv.properties: prayer=true, prayer_method (MWL, ISNA, Egypt, Makkah, Karachi, Moonsighting), asr (standard or hanafi) and
  * hijri_adjust (days, for a local moon sighting a day off Umm al-Qura's). */
 var Islam = (function () {
   'use strict';
 
   // Fajr and Isha angles below the horizon; Makkah's Isha is 90 minutes after Maghrib.
-  var METHODS = {MWL: [18, 17], ISNA: [15, 15], Egypt: [19.5, 17.5], Makkah: [18.5, 90], Karachi: [18, 18]};
+  // Moonsighting (the Moonsighting Committee's, many UK mosques'): 18 degrees, kept within its seasonal limits.
+  var METHODS = {MWL: [18, 17], ISNA: [15, 15], Egypt: [19.5, 17.5], Makkah: [18.5, 90], Karachi: [18, 18], Moonsighting: [18, 18]};
   var RAD = Math.PI / 180;
   var MONTHS = ['Muharram', 'Safar', "Rabi' al-Awwal", "Rabi' al-Thani", 'Jumada al-Ula', 'Jumada al-Akhirah',
     'Rajab', "Sha'ban", 'Ramadan', 'Shawwal', "Dhu al-Qa'dah", 'Dhu al-Hijjah'];
@@ -27,6 +28,15 @@ var Islam = (function () {
     return Math.acos((-sin(angle) - sin(lat) * sin(decl)) / (cos(lat) * cos(decl))) / RAD / 15;
   }
 
+  /** Minutes from sunrise back to Fajr (abcd for the morning) or from sunset on to Isha, by the days since the
+   * winter solstice: the Moonsighting Committee's seasonal curve (Khalid Shaukat). */
+  function seasonal(lat, days, abcd) {
+    var k = Math.abs(lat) / 55, a = 75 + abcd[0] * k, b = 75 + abcd[1] * k, c = 75 + abcd[2] * k, d = 75 + abcd[3] * k;
+    return days < 91 ? a + (b - a) / 91 * days : days < 137 ? b + (c - b) / 46 * (days - 91)
+      : days < 183 ? c + (d - c) / 46 * (days - 137) : days < 229 ? d + (c - d) / 46 * (days - 183)
+      : days < 275 ? c + (b - c) / 46 * (days - 229) : b + (a - b) / 91 * (days - 275);
+  }
+
   /** The day's times (ms) for the local date of `day`: fajr, sunrise, dhuhr, asr, maghrib, isha. */
   function times(day, lat, lon) {
     var c = CONFIG.islam || {}, m = METHODS[c.method] || METHODS.MWL;
@@ -41,11 +51,23 @@ var Islam = (function () {
     // High latitudes (Wirral's summer): where the sun never gets that low, or the time comes too late, the angle
     // takes its share of the night (angle / 60), from sunset to sunrise.
     var night = 24 - (t.maghrib - t.sunrise);
-    var early = t.sunrise - m[0] / 60 * night;
-    if (isNaN(t.fajr) || t.fajr < early) t.fajr = early;
-    if (m[1] <= 30) {
-      var late = t.maghrib + m[1] / 60 * night;
-      if (isNaN(t.isha) || t.isha > late) t.isha = late;
+    if (c.method === 'Moonsighting') {
+      var leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0), length = leap ? 366 : 365;
+      var doy = Math.round((base - Date.UTC(y, 0, 1)) / 86400000) + 1;
+      var days = lat >= 0 ? (doy + 10) % length : (doy - (leap ? 173 : 172) + length) % length;
+      var dawn = t.sunrise - seasonal(lat, days, [28.65, 19.44, 32.74, 48.10]) / 60;
+      var dusk = t.maghrib + seasonal(lat, days, [25.60, 2.050, -9.21, 6.14]) / 60;
+      if (isNaN(t.fajr) || t.fajr < dawn) t.fajr = dawn;
+      if (isNaN(t.isha) || t.isha > dusk) t.isha = dusk;
+      t.dhuhr += 5 / 60;     // its margins: Zuhr 5 minutes after noon, Maghrib 3 after sunset
+      t.maghrib += 3 / 60;
+    } else {
+      var early = t.sunrise - m[0] / 60 * night;
+      if (isNaN(t.fajr) || t.fajr < early) t.fajr = early;
+      if (m[1] <= 30) {
+        var late = t.maghrib + m[1] / 60 * night;
+        if (isNaN(t.isha) || t.isha > late) t.isha = late;
+      }
     }
     var out = {};
     for (var k in t) if (t.hasOwnProperty(k)) out[k] = base + Math.round(t[k] * 60) * 60000;
