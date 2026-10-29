@@ -322,6 +322,7 @@
   function sheetOpen() { return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG || st.zone === Z.CITY || st.zone === Z.KEY || st.zone === Z.ABOUT || st.zone === Z.GITHUB; }
 
   function updateFocus() {
+    if (ambient) ambientFrom(currentPicture());
     var i, list;
     list = $('tabs').children;
     for (i = 0; i < list.length; i++) {
@@ -955,14 +956,129 @@
       });
       return;
     }
+    if (ambient) toggleAmbient();
     movie = lights.map(function (l) { return {on: l.on, brightness: l.brightness, temp: l.temp, hue: l.hue, sat: l.sat}; });
     lights.forEach(function (l) { setLight(l, MOVIE); });
+  }
+
+  // Ambient: the lights take the colours of what Free My TV shows (the focused pick, the screensaver's photo).
+  // Two lights split the picture: the first its left half's colour, the second its right half's.
+
+  var ambient = null, ambientWant = null, ambientAt = 0, ambientTimer = 0, ambientUrl = '', colourCache = {};
+
+  function ambientLights() {
+    var names = (CONFIG.tapo && CONFIG.tapo.ambient) || [];
+    var picked = lights.filter(function (l) { return names.indexOf(l.name) >= 0; });
+    if (!picked.length) picked = lights.filter(function (l) { return /lounge|living/i.test(l.name); });
+    return picked.length ? picked : lights;
+  }
+
+  /** The picture's colours, left half and right half: [{h, s, v}, {h, s, v}] (0-360, 0-1), from a small copy of it. */
+  function pictureColours(url, done) {
+    if (colourCache[url]) { done(colourCache[url]); return; }
+    var img = new Image();
+    if (/^https?:/.test(url)) img.crossOrigin = 'anonymous';
+    img.onload = function () {
+      try {
+        var c = document.createElement('canvas'), w = 32, h = 18;
+        c.width = w; c.height = h;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        var px = ctx.getImageData(0, 0, w, h).data, halves = [];
+        for (var side = 0; side < 2; side++) {
+          var r = 0, g = 0, b = 0, sum = 0;
+          for (var y = 0; y < h; y++) {
+            for (var x = side * w / 2; x < (side + 1) * w / 2; x++) {
+              var i = (y * w + x) * 4, R = px[i], G = px[i + 1], B = px[i + 2];
+              var max = Math.max(R, G, B), min = Math.min(R, G, B), sat = max ? (max - min) / max : 0;
+              // Vivid, mid-bright pixels count most: a dark or washed-out corner says little about the picture.
+              var weight = 0.05 + sat * sat * (max > 30 && max < 245 ? 1 : 0.2);
+              r += R * weight; g += G * weight; b += B * weight; sum += weight;
+            }
+          }
+          halves.push(hsv(r / sum, g / sum, b / sum));
+        }
+        colourCache[url] = halves;
+        done(halves);
+      } catch (e) { done(null); }   // a picture the page may not read
+    };
+    img.onerror = function () { done(null); };
+    img.src = url;
+  }
+
+  function hsv(r, g, b) {
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, h = 0;
+    if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return {h: Math.round((h * 60 + 360) % 360), s: max ? d / max : 0, v: max / 255};
+  }
+
+  /** What the lights should show for this picture (only while ambient is on), at most every 3 s and only on a change. */
+  function ambientFrom(url) {
+    if (!ambient || !url || url === ambientUrl) return;
+    ambientUrl = url;
+    pictureColours(url, function (halves) {
+      if (!ambient || ambientUrl !== url || !halves) return;
+      ambientWant = halves;
+      clearTimeout(ambientTimer);
+      ambientTimer = setTimeout(applyAmbient, Math.max(600, 3000 - (Date.now() - ambientAt)));
+    });
+  }
+
+  function applyAmbient() {
+    if (!ambient || !ambientWant || document.hidden) return;
+    ambientAt = Date.now();
+    var picked = ambientLights(), night = Data.isNight(Date.now());
+    picked.forEach(function (l, i) {
+      var c = ambientWant[picked.length > 1 ? Math.min(i, 1) : 0];
+      // A grey picture: warm white instead of a muddy colour. At night, dimmer.
+      var params = c.s < 0.15 ? {color_temp: 2700} : {hue: c.h, saturation: Math.round(Math.min(90, 35 + c.s * 60)), color_temp: 0};
+      params.device_on = true;
+      params.brightness = night ? 22 : 45;
+      setLight(l, params);
+    });
+  }
+
+  /** Ambient on (each light as it was is kept) or off (each back as it was). Movie mode and ambient take turns. */
+  function toggleAmbient() {
+    if (ambient) {
+      var was = ambient;
+      ambient = null;
+      ambientUrl = '';
+      Prefs.set('ambient', false);
+      restoreLights(ambientLights(), was);
+      return;
+    }
+    if (movie) toggleMovie();
+    var picked = ambientLights();
+    ambient = picked.map(function (l) { return {on: l.on, brightness: l.brightness, temp: l.temp, hue: l.hue, sat: l.sat}; });
+    Prefs.set('ambient', true);
+    ambientFrom(currentPicture());
+  }
+
+  function restoreLights(list, was) {
+    list.forEach(function (l, i) {
+      var w = was[i];
+      if (!w) return;
+      var back = w.temp ? {color_temp: w.temp} : w.hue !== undefined ? {hue: w.hue, saturation: w.sat, color_temp: 0} : {};
+      back.device_on = w.on;
+      if (w.on) back.brightness = w.brightness || 50;
+      setLight(l, back);
+    });
+  }
+
+  /** The picture on screen now: the screensaver's, the focused pick's, or the home screen's background. */
+  function currentPicture() {
+    if (saverOn) return saverUrl;
+    var p = st.zone === Z.CARDS && cards[st.card];
+    // w185: a size nothing else loads, so the browser's copy is a CORS one the canvas may read.
+    return p && p.backdrop ? Data.image(p.backdrop, 'w185') : (bgUrl || '').replace('/w300/', '/w185/');
   }
 
   function lightRows() {
     var anyOn = lights.some(function (l) { return l.on; });
     var rows = [
       {label: tr('Movie mode'), toggle: !!movie, step: toggleMovie},
+      {label: tr('Ambient colours'), toggle: !!ambient, step: toggleAmbient},
       {label: tr('All lights'), toggle: anyOn, step: function () {
         movie = null;
         lights.forEach(function (l) { setLight(l, {device_on: !anyOn}); });
@@ -1822,6 +1938,8 @@
     return out;
   }
 
+  var saverUrl = '';
+
   function showSaver() {
     var photos = saverPhotos();
     saverOn = true;
@@ -1848,6 +1966,8 @@
       var back = front === a ? b : a;
       if (p) {
         back.style.backgroundImage = 'url(' + (p.own ? p.src : Data.image(p.backdrop, 'original')) + ')';
+        saverUrl = p.own ? p.src : Data.image(p.backdrop, 'w185');
+        if (ambient) ambientFrom(saverUrl);
         // Your photos whole, on black (a portrait one would be cropped to a band by cover); the picks fill the screen.
         back.style.backgroundSize = p.own ? 'contain' : '';
         back.style.backgroundColor = p.own ? '#000' : '';
@@ -2004,7 +2124,8 @@
     reset();
     loadApps(function () { renderShelf(); renderDrawer(); restInDrawer(); Data.refresh(); });
   }
-  refreshLights();
+  // Ambient was on: on again once the lights have said how they are (what they were before it is lost with the restart).
+  refreshLights(function () { if (Prefs.ambient() && !ambient) toggleAmbient(); });
 
   window.addEventListener('resize', fit);
   document.addEventListener('webOSRelaunch', reopened);   // LG: opened again while running

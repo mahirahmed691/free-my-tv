@@ -48,6 +48,8 @@ var Prefs = (function () {
     theme: function () { return pick('theme', CONFIG.theme || 'auto'); },
     /** The home screen's font: inter, manrope, outfit, jakarta, lexend or lora. */
     font: function () { return pick('font', CONFIG.font || 'inter'); },
+    /** Ambient colours on the lights (Home Settings' drawer > Lights), kept across restarts. */
+    ambient: function () { return !!pick('ambient', false); },
     weather: function () { return pick('weather', true); },
     /** OK on the screensaver opens the title it shows, in its app; any other key only closes it (off by default). */
     saverWatch: function () { return pick('saverWatch', false) === true; },
