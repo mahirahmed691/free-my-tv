@@ -167,12 +167,64 @@ var Islam = (function () {
 
   /** "Eid Mubarak, …" on the Eids, "Ramadan Mubarak, …" in Ramadan, "Jumu'ah Mubarak, …" on Friday mornings; else null. */
   function greeting(names, now) {
-    var d = new Date(now), h = hijri(d);
+    var d = new Date(now), h = hijri(d), t = together(now);
+    if (t && t.anniversary) return trf('Happy anniversary, {names}', {names: names});
     if ((h.month === 10 && h.day <= 3) || (h.month === 12 && h.day >= 10 && h.day <= 13)) return trf('Eid Mubarak, {names}', {names: names});
     if (h.month === 9) return trf('Ramadan Mubarak, {names}', {names: names});
     if (d.getDay() === 5 && d.getHours() >= 5 && d.getHours() < 12) return trf("Jumu'ah Mubarak, {names}", {names: names});
     return null;
   }
 
-  return {on: function () { return !!(CONFIG.islam && CONFIG.islam.prayer); }, times: times, hijri: hijri, next: next, greeting: greeting};
+  // MARK: - The moon, the ayah of the day, and how long you've been married
+
+  /** The moon's age as a fraction of its month (0 new, 0.5 full), from a known new moon (6 Jan 2000 18:14 UTC). */
+  function moonPhase(at) {
+    var f = ((at - 947182440000) / 86400000 / 29.530588853) % 1;
+    return f < 0 ? f + 1 : f;
+  }
+
+  /** The moon tonight as a small SVG (sized in em): the lit part from its phase, waxing on the right. */
+  function moonSvg(at) {
+    var f = moonPhase(at), k = Math.cos(2 * Math.PI * f), rx = Math.abs(k) * 10, waxing = f < 0.5;
+    var edge = waxing ? 'M12 2 A10 10 0 0 1 12 22' : 'M12 2 A10 10 0 0 0 12 22';
+    // The terminator back to the top: bulging toward the lit limb in a crescent, away from it when gibbous.
+    var sweep = (waxing ? k > 0 : k < 0) ? 0 : 1;
+    return '<svg class="moon" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.22"/>' +
+      '<path d="' + edge + ' A' + rx.toFixed(2) + ' 10 0 0 ' + sweep + ' 12 2Z" fill="currentColor"/></svg>';
+  }
+
+  /** The wedding day as a local Date (married=YYYY-MM-DD), or null. */
+  function married() {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(((CONFIG.islam || {}).married) || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+  }
+
+  /** {years, days, anniversary} since the wedding day, or null: whole years, then the days since the last anniversary. */
+  function together(now) {
+    var w = married(), d = new Date(now);
+    if (!w || d < w) return null;
+    var today = new Date(d.getFullYear(), d.getMonth(), d.getDate()), years = today.getFullYear() - w.getFullYear();
+    var last = new Date(today.getFullYear(), w.getMonth(), w.getDate());
+    if (last > today) { years--; last = new Date(today.getFullYear() - 1, w.getMonth(), w.getDate()); }
+    var days = Math.round((today - last) / 86400000);
+    return {years: years, days: days, anniversary: days === 0 && years > 0};
+  }
+
+  /** "2 years, 65 days" (or only one part when the other is 0). */
+  function togetherText(t) {
+    var y = t.years ? plural('plural|one:{n} year|other:{n} years', t.years) : '';
+    var d = t.days || !t.years ? plural('plural|one:{n} day|other:{n} days', t.days) : '';
+    return y && d ? trf('together|{years}, {days}', {years: y, days: d}) : y || d;
+  }
+
+  /** Today's ayah ({text, ref}): one a day in turn, and on the anniversary the one about spouses. */
+  function verse(now) {
+    var t = together(now), d = new Date(now);
+    if (t && t.anniversary) return ANNIVERSARY_VERSE;
+    var day = Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    return VERSES[day % VERSES.length];
+  }
+
+  return {on: function () { return !!(CONFIG.islam && CONFIG.islam.prayer); }, times: times, hijri: hijri, next: next, greeting: greeting,
+    moonSvg: moonSvg, moonPhase: moonPhase, together: together, togetherText: togetherText, verse: verse};
 })();

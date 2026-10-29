@@ -436,6 +436,13 @@
     return [f.next.home + ' v ' + f.next.away + ' · ' + (today ? tr('Today') : Data.weekday(at)) + ' ' + Data.time(at), '', today];
   }
 
+  /** Tonight's moon, then the Hijri date, into `box` (after what's there). */
+  function moonAndHijri(box, d) {
+    var m = el('span', 'moonbox', box);
+    m.innerHTML = Islam.moonSvg(d.getTime());
+    box.appendChild(document.createTextNode(Islam.hijri(d).text));
+  }
+
   /** One glass chip: a small coloured label, then the text (a string, or a function filling the chip). */
   function chip(q, kind, label, fill) {
     var c = el('span', 'chip ' + kind, q);
@@ -457,7 +464,10 @@
         // Its adhan, and the jamaat while it's still to come; once the adhan has gone, only the jamaat.
         var when = p.at > Date.now() ? Data.time(p.at) : '';
         if (p.iqamah) when += (when ? '  ·  ' : '') + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
-        chip(q, 'prayer', p.name, when + '  ·  ' + Islam.hijri(new Date()).text);
+        chip(q, 'prayer', p.name, function (c) {
+          c.appendChild(document.createTextNode(when + '  ·  '));
+          moonAndHijri(c, new Date());
+        });
       }
     }
     var foot = footballLine();
@@ -471,6 +481,8 @@
       chip(q, 'agenda', tr('Today'), parts.join('  ·  '));
     }
     if (Data.note) chip(q, 'note', tr('Note'), Data.note);
+    var wed = Islam.together(Date.now());
+    if (wed) chip(q, 'love', tr('Married'), Islam.togetherText(wed));
     var t = Data.trains;
     if (t && t.services && t.services.length) {
       chip(q, 'trains', tr('Trains'), function (c) {
@@ -583,7 +595,8 @@
   function renderClock() {
     var d = new Date(), c = $('clock');
     c.firstChild.textContent = formatDate('format|h:mm', d.getTime());
-    c.lastChild.textContent = formatDate('format|EEEE, MMMM d', d.getTime()) + (Islam.on() ? '  ·  ' + Islam.hijri(d).text : '');
+    c.lastChild.textContent = formatDate('format|EEEE, MMMM d', d.getTime()) + (Islam.on() ? '  ·  ' : '');
+    if (Islam.on()) moonAndHijri(c.lastChild, d);
   }
 
   /** On the minute, so the clock never runs late (the 30-second refresh could, by up to 30 s). */
@@ -1693,6 +1706,12 @@
     el('div', 'date', clock);
     el('div', 'title', clock);
     var hint = el('div', 'hint', clock);
+    if (Islam.on()) {
+      var verse = el('div', 'verse', s);
+      el('div', 'text', verse);
+      el('div', 'ref', verse);
+      el('div', 'love', verse);
+    }
     var front = a;
     function next() {
       if (!saverOn) return;
@@ -1728,7 +1747,20 @@
   function tickSaverClock(clock) {
     var d = new Date();
     clock.firstChild.textContent = formatDate('format|h:mm', d.getTime());
-    clock.children[1].textContent = formatDate('format|EEEE, MMMM d', d.getTime());
+    clock.children[1].textContent = formatDate('format|EEEE, MMMM d', d.getTime()) + (Islam.on() ? '  ·  ' : '');
+    if (Islam.on()) moonAndHijri(clock.children[1], d);
+    renderVerse();
+  }
+
+  /** The screensaver's other card: today's ayah, and how long you've been married. */
+  function renderVerse() {
+    var card = $('saver').querySelector('.verse');
+    if (!card) return;
+    var v = Islam.verse(Date.now()), t = Islam.together(Date.now());
+    card.children[0].textContent = v.text;
+    card.children[1].textContent = trf("Qur'an {ref}", {ref: v.ref});
+    card.children[2].textContent = t ? (t.anniversary ? trf('Happy anniversary, {names}', {names: CONFIG.greeting || ''})
+      : trf('Married {time}', {time: Islam.togetherText(t)})) : '';
   }
 
   function hideSaver() {

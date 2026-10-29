@@ -204,6 +204,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #quotes .chip.note { font-weight: 600; }
 #quotes .chip.note b { color: #0071E3; }
 #quotes .chip.prayer b { color: #1E8E3E; }
+#quotes .chip.love b { color: #D6336C; }
+.moonbox { display: inline-block; width: 0.95em; height: 0.95em; margin-right: 0.3em; vertical-align: -0.12em; }
+.moonbox svg { display: block; width: 100%; height: 100%; }
+#quotes .moonbox svg { width: 100%; height: 100%; margin: 0; vertical-align: top; }   /* not the coins' 15 px */
 #quotes .chip.live b, #quotes .chip .late { color: #D70015; font-weight: 600; }
 #quotes .chip.live { font-weight: 600; }
 #quotes .chip.warn { background: rgba(255, 159, 10, 0.22); color: #8A4B00; font-weight: 600; }
@@ -212,6 +216,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .night #quotes .chip b { color: rgba(245, 245, 247, 0.6); }
 .night #quotes .chip.note b { color: #64D2FF; }
 .night #quotes .chip.prayer b { color: #30D158; }
+.night #quotes .chip.love b { color: #FF6B9A; }
 .night #quotes .chip.live b, .night #quotes .chip .late { color: #FF453A; }
 .night #quotes .chip.warn { background: rgba(255, 159, 10, 0.24); color: #FFC56B; }
 #dashboard .side.bad { color: #D70015; font-weight: 600; }
@@ -637,6 +642,23 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #saver .clock .date { margin-top: 10px; font-size: 34px; font-weight: 500; color: rgba(255, 255, 255, 0.82); }
 #saver .clock .title { margin-top: 18px; font-size: 26px; font-weight: 500; color: rgba(255, 255, 255, 0.65); }
 #saver .clock .hint { margin-top: 8px; font-size: 22px; color: rgba(255, 255, 255, 0.55); }
+#saver .verse {
+  position: absolute;
+  right: 80px;
+  bottom: 90px;
+  max-width: 640px;
+  padding: 30px 42px 32px;
+  border-radius: 40px;
+  color: #FFF;
+  background: -webkit-linear-gradient(top, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1));
+  background: linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1));
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35), inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+#saver .verse .text { font-size: 34px; font-weight: 500; line-height: 1.3; }
+#saver .verse .ref { margin-top: 12px; font-size: 22px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+#saver .verse .love { margin-top: 18px; font-size: 24px; font-weight: 500; color: #FFB3C9; }
+#saver .verse .love:empty { display: none; }
+.lite #saver .verse { box-shadow: none; }
 
 /* MARK: - Toast */
 

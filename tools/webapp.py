@@ -80,7 +80,9 @@ def read_config(path):
         'greeting': values.get('greeting', ''),
         # Prayer times and the Hijri date (web/islam.js): the method, Asr's shadow and a day's shift for a moon sighting.
         'islam': {'prayer': values.get('prayer', 'false').lower() == 'true', 'method': values.get('prayer_method', 'MWL') or 'MWL',
-                  'asr': values.get('asr', 'standard') or 'standard', 'hijriAdjust': int(values.get('hijri_adjust', '0') or 0)},
+                  'asr': values.get('asr', 'standard') or 'standard', 'hijriAdjust': int(values.get('hijri_adjust', '0') or 0),
+                  # Your wedding day (YYYY-MM-DD; config.properties keeps it out of git): the Married chip and anniversaries.
+                  'married': values.get('married', '')},
         # Your photos on the screensaver (scripts/tv_photos.py puts them in out/photos): half, mostly or mine.
         'photosDir': values.get('photos_dir', ''), 'photosMix': values.get('photos_mix', 'half') or 'half',
         # What was built, for About this TV (written by scripts/tvconfig.py; empty otherwise).
