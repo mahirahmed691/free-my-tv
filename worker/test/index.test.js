@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -251,6 +251,27 @@ test('notes: the TV reads; only ADMIN_TOKEN writes or clears; length and emptine
   assert.equal((await req('/v1/notes', { method: 'DELETE', token: 'admin-token' })).status, 200);
   assert.equal((await (await req('/v1/notes')).json()).text, '');
   assert.equal((await req('/v1/tides', { method: 'POST', token: 'admin-token' })).status, 405);           // only notes take writes
+});
+
+test('list: phones add and tick off (named), the TV reads, only ADMIN_TOKEN writes', async () => {
+  env.ADMIN_TOKEN = 'Mariam=her-token,Mahir=his-token';
+  assert.deepEqual(listItems(' milk,  eggs\n\nfree  range ,'), ['milk', 'eggs', 'free range']);
+  assert.equal((await req('/v1/list')).status, 200);                                                   // TV token reads
+  assert.equal((await req('/v1/list', { token: 'nope' })).status, 401);
+  assert.equal((await req('/v1/list', { method: 'POST', body: { add: 'milk' } })).status, 401);         // TV can't write
+  let r = await (await req('/v1/list', { method: 'POST', token: 'her-token', body: { add: 'Milk, eggs' } })).json();
+  assert.deepEqual(r.names, ['Milk', 'eggs']);
+  assert.equal(r.items[0].from, 'Mariam');
+  r = await (await req('/v1/list', { method: 'POST', token: 'his-token', body: { add: 'milk\nbread' } })).json();
+  assert.deepEqual(r.names, ['Milk', 'eggs', 'bread']);                                                 // no double milk
+  r = await (await req('/v1/list', { token: 'his-token' })).json();                                   // a phone reads
+  assert.equal(r.summary, 'Milk, eggs, bread');
+  r = await (await req('/v1/list', { method: 'POST', token: 'his-token', body: { done: 'milk\nEGGS' } })).json();
+  assert.deepEqual(r.names, ['bread']);
+  assert.equal((await req('/v1/list', { method: 'POST', token: 'his-token', body: { add: 'x'.repeat(41) } })).status, 400);
+  assert.equal((await req('/v1/list', { method: 'POST', token: 'his-token', body: {} })).status, 400);
+  r = await (await req('/v1/list', { method: 'DELETE', token: 'her-token' })).json();
+  assert.equal(r.summary, 'The list is empty.');
 });
 
 test('notes: a named key signs the note; an unnamed one leaves it unsigned', async () => {

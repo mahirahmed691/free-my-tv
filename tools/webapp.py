@@ -75,7 +75,8 @@ def read_config(path):
                    'trains': values.get('trains', 'false').lower() == 'true', 'notes': values.get('notes', 'false').lower() == 'true',
                    'football': values.get('football', 'false').lower() == 'true',
                    'calendar': values.get('calendar', 'false').lower() == 'true',
-                   'mosque': values.get('mosque', 'false').lower() == 'true'},
+                   'mosque': values.get('mosque', 'false').lower() == 'true',
+                   'shopping': values.get('shopping', 'false').lower() == 'true'},
         # "Good evening, <greeting>" in place of "For You" (empty: "For You").
         'greeting': values.get('greeting', ''),
         # Prayer times and the Hijri date (web/islam.js): the method, Asr's shadow and a day's shift for a moon sighting.
@@ -86,7 +87,9 @@ def read_config(path):
                   # Maghrib's warm light: the Tapo lights that are on turn warm and soft at Maghrib (the TV has to be on).
                   'prayerLights': values.get('prayer_lights', 'false').lower() == 'true',
                   # At each adhan: a banner (the TV's toast over other apps) and the lights that are on dip.
-                  'prayerAlert': values.get('prayer_alert', 'false').lower() == 'true'},
+                  'prayerAlert': values.get('prayer_alert', 'false').lower() == 'true',
+                  # Minutes to the mosque: "Leave by" on the Jumu'ah chip, and a reminder when it's time (0: neither).
+                  'travel': int(values.get('mosque_travel', '0') or 0)},
         # Your Tapo lights (scripts/tapo.py writes both to config.properties): the login's hash and "Name@IP" each.
         'tapo': {'auth': values.get('tapo_auth', ''),
                  'lights': [{'name': x.rpartition('@')[0], 'ip': x.rpartition('@')[2]}
@@ -95,12 +98,24 @@ def read_config(path):
                  'ambient': [x.strip() for x in values.get('ambient_lights', '').split(',') if x.strip()],
                  # The lights the TV set (movie mode, ambient) go off when the TV does.
                  'offWithTv': values.get('lights_off_with_tv', 'true').lower() == 'true'},
+        # Bin day, as a rule (Wirral has no lookup): "2026-11-02 Grey, Green" is a collection that day and every 7 days
+        # after, the bins taking turns in that order. The chip shows from 4 pm the day before until 10 am on the day.
+        'bins': bins(values.get('bins', '')),
         # Your photos on the screensaver (scripts/tv_photos.py puts them in out/photos): half, mostly or mine.
         'photosDir': values.get('photos_dir', ''), 'photosMix': values.get('photos_mix', 'half') or 'half',
         # What was built, for About this TV (written by scripts/tvconfig.py; empty otherwise).
         'build': {'commit': values.get('build_commit', ''), 'tag': values.get('build_tag', ''),
                   'settings': values.get('settings_hash', ''), 'devModeUntil': int(values.get('devmode_until', '0') or 0)},
     }
+
+
+def bins(text):
+    m = re.match(r'^(\d{4}-\d\d-\d\d)\s+(.+)$', text.strip())
+    if not text.strip():
+        return None
+    if not m:
+        sys.exit('config: bins must look like "2026-11-02 Grey, Green" (got "%s")' % text)
+    return {'start': m.group(1), 'cycle': [x.strip() for x in m.group(2).split(',') if x.strip()]}
 
 
 def coins():
@@ -132,13 +147,18 @@ def files(config, made_by):
         with open(os.path.join(icons, name), 'rb') as f:
             out['icons/' + name] = f.read()
     # Your own photos, only when this build asked for them (never in a generic build or a release).
-    photos, pets, photo_dir = [], [], os.path.join(ROOT, 'out', 'photos')
+    photos, pets, days, photo_dir = [], [], {}, os.path.join(ROOT, 'out', 'photos')
     if config.get('photosDir') and os.path.isdir(photo_dir):
         for name in sorted(os.listdir(photo_dir)):
             if name.endswith('.jpg'):
                 with open(os.path.join(photo_dir, name), 'rb') as f:
                     out['photos/' + name] = f.read()
                 photos.append('photos/' + name)
+        # The day each was taken (its EXIF date), for "on this day" on the screensaver.
+        days_list = os.path.join(photo_dir, 'days.json')
+        if os.path.exists(days_list):
+            with open(days_list, encoding='utf-8') as f:
+                days = {'photos/' + k: v for k, v in json.load(f).items()}
         # Your pets (scripts/tv_photos.py: a folder each): their photos and the squares around their faces.
         pets_list = os.path.join(photo_dir, 'pets.json')
         if os.path.exists(pets_list):
@@ -147,7 +167,7 @@ def files(config, made_by):
             for name in sorted(os.listdir(os.path.join(photo_dir, 'pets'))):
                 with open(os.path.join(photo_dir, 'pets', name), 'rb') as f:
                     out['photos/pets/' + name] = f.read()
-    config = dict(config, photos=photos, pets=pets)
+    config = dict(config, photos=photos, pets=pets, photoDays=days)
     out['config.js'] = ('/* Generated by %s. */\nwindow.CONFIG = %s;\n'
                         % (made_by, json.dumps(config, ensure_ascii=False))).encode('utf-8')
     out['coins.js'] = ('window.COINS = %s;\n' % json.dumps(coins())).encode('utf-8')

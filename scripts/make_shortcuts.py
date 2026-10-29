@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Two iPhone Shortcuts for the TV's note: "Note to TV" (asks, then sends) and "Clear TV note".
+"""iPhone Shortcuts for the TV: "Note to TV" (asks, then sends), "Clear TV note", and for the shopping list "Add to TV
+list" (asks: one item, or several with commas) and "TV shopping list" (shows it; the ones you pick are ticked off).
 
     python3 scripts/make_shortcuts.py    # → out/shortcuts/*.shortcut, signed; AirDrop them to the phone
 
@@ -28,6 +29,11 @@ def output_of(action_uuid, name):
     """A text field holding another action's output (Shortcuts' "magic variable")."""
     return {'Value': {'string': '￼', 'attachmentsByRange': {'{0, 1}': {'OutputUUID': action_uuid, 'Type': 'ActionOutput', 'OutputName': name}}},
             'WFSerializationType': 'WFTextTokenString'}
+
+
+def variable(action_uuid, name):
+    """A whole other action's output, as an action's input."""
+    return {'Value': {'OutputUUID': action_uuid, 'Type': 'ActionOutput', 'OutputName': name}, 'WFSerializationType': 'WFTextTokenAttachment'}
 
 
 def dictionary(items):
@@ -75,9 +81,25 @@ def main():
     clear = request(notes, 'DELETE', token)
     cleared = action('is.workflow.actions.showresult', Text=output_of(clear['WFWorkflowActionParameters']['UUID'], 'Contents of URL'))
 
+    lst = url.rstrip('/') + '/v1/list'
+    uid = lambda a: a['WFWorkflowActionParameters']['UUID']  # noqa: E731
+    item = action('is.workflow.actions.ask', WFAskActionPrompt='Add to the list (commas for more than one)', WFInputType='Text')
+    add = request(lst, 'POST', token, [('add', output_of(uid(item), 'Ask for Input'))])
+    added = action('is.workflow.actions.getvalueforkey', WFInput=variable(uid(add), 'Contents of URL'), WFDictionaryKey='summary')
+    shown_list = action('is.workflow.actions.showresult', Text=output_of(uid(added), 'Dictionary Value'))
+    read = request(lst, 'GET', token)
+    names = action('is.workflow.actions.getvalueforkey', WFInput=variable(uid(read), 'Contents of URL'), WFDictionaryKey='names')
+    pick = action('is.workflow.actions.choosefromlist', WFInput=variable(uid(names), 'Dictionary Value'),
+                  WFChooseFromListActionPrompt='Tick off what you bought', WFChooseFromListActionSelectMultiple=True)
+    done = request(lst, 'POST', token, [('done', output_of(uid(pick), 'Chosen Item'))])
+    left = action('is.workflow.actions.getvalueforkey', WFInput=variable(uid(done), 'Contents of URL'), WFDictionaryKey='summary')
+    shown_left = action('is.workflow.actions.showresult', Text=output_of(uid(left), 'Dictionary Value'))
+
     os.makedirs(out, exist_ok=True)
     for name, flow in [('Note to TV', workflow([ask, send, shown], 59511, 4282601983)),
-                       ('Clear TV note', workflow([clear, cleared], 59446, 4271458815))]:
+                       ('Clear TV note', workflow([clear, cleared], 59446, 4271458815)),
+                       ('Add to TV list', workflow([item, add, added, shown_list], 59511, 2846468607)),
+                       ('TV shopping list', workflow([read, names, pick, done, left, shown_left], 59511, 2846468607))]:
         raw = os.path.join(out, name + ' (unsigned).shortcut')
         signed = os.path.join(out, name + '.shortcut')
         fd = os.open(raw, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -90,7 +112,7 @@ def main():
             sys.exit('Signing "%s" failed: %s' % (name, (result.stderr or result.stdout).strip()[:300]))
         os.chmod(signed, 0o600)
         print('Built', signed)
-    print('AirDrop both to %s iPhone, add them, then delete %s (they hold the phone\'s key).'
+    print('AirDrop them to %s iPhone, add them, then delete %s (they hold the phone\'s key).'
           % (who + "'s" if who else 'the', os.path.relpath(out, os.path.dirname(OUT))))
 
 

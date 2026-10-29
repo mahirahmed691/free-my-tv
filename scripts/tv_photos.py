@@ -10,11 +10,12 @@ changed photos are converted. The originals are never touched. At most MAX photo
 
 Each folder inside photos_dir is a pet, named by the folder (~/Pictures/TV/Maya): its photos join the screensaver with
 its name, and scripts/tv_pet.swift cuts a square around its face (Apple's Vision) for the round photo by the greeting.
-out/photos/pets.json lists them.
+out/photos/pets.json lists them, and out/photos/days.json the day each photo was taken (for "on this day").
 """
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,13 @@ def convert(src, dest, name='tv_photo'):
         raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or 'exit %d' % r.returncode)
 
 
+def taken(path):
+    """The day a photo was taken (YYYY-MM-DD, from its EXIF date through sips), or ''."""
+    r = subprocess.run(['sips', '-g', 'creation', path], capture_output=True, text=True)
+    m = re.search(r'creation: (\d{4}):(\d\d):(\d\d)', r.stdout)
+    return '%s-%s-%s' % m.groups() if m else ''
+
+
 def main():
     folder = tvconfig.settings().get('photos_dir', '').strip()
     shutil.rmtree(OUT, ignore_errors=True)
@@ -63,7 +71,7 @@ def main():
     names = sorted(n for n in os.listdir(folder) if n.lower().endswith(EXTENSIONS) and not n.startswith('.'))
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(CACHE, exist_ok=True)
-    total, packed, failed = 0, 0, []
+    total, packed, failed, days = 0, 0, [], {}
     for name in names:
         if packed >= MAX:
             print('photos: only the first %d are packed (of %d)' % (MAX, len(names)))
@@ -85,6 +93,9 @@ def main():
         packed += 1
         total += size
         shutil.copyfile(cached, os.path.join(OUT, '%03d.jpg' % packed))
+        day = taken(src)
+        if day:
+            days['%03d.jpg' % packed] = day
     pets, count = [], 0
     for pet in sorted(n for n in os.listdir(folder) if os.path.isdir(os.path.join(folder, n)) and not n.startswith('.')):
         sub = os.path.join(folder, pet)
@@ -116,6 +127,9 @@ def main():
             entry['faces'].append('photos/pets/%03d-face.jpg' % count)
         if entry['photos']:
             pets.append(entry)
+    if days:
+        with open(os.path.join(OUT, 'days.json'), 'w', encoding='utf-8') as f:
+            json.dump(days, f)
     if pets:
         with open(os.path.join(OUT, 'pets.json'), 'w', encoding='utf-8') as f:
             json.dump(pets, f, ensure_ascii=False)

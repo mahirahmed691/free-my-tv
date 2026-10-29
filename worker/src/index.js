@@ -10,6 +10,8 @@ import { eventsBetween, dayBounds } from './ics.js';
  *   GET /v1/dashboard/details   the same with repo names and PR titles, for the sheet the TV opens on purpose
  *   GET /v1/trains      the next departures from TRAINS_CRS (Huxley2's National Rail feed; Cloudflare caches 60 s)
  *   GET /v1/notes       the note shown on the TV; POST {"text"} or DELETE it with ADMIN_TOKEN (make note)
+ *   GET /v1/list        the shopping list (the TV, or a phone's ADMIN_TOKEN); POST {"add"} or {"done"} (comma or line
+ *                       separated) or DELETE it with ADMIN_TOKEN (the phones' Shortcuts)
  *   GET /v1/football    FOOTBALL_TEAM's live match, next fixture and last result (football-data.org, 5 min cache)
  *   GET /v1/calendar    today's events from CALENDAR_ICS (a calendar's secret iCal address; 10 min cache)
  *   GET /v1/salah       today's adhan and jamaat at your mosque, as it publishes them (SALAH_WIDGET, its ConnectMazjid
@@ -438,6 +440,48 @@ async function notes(request, env) {
   return json(note);
 }
 
+// MARK: Shopping list (the phones' Shortcuts add and tick off; the TV reads)
+
+const LIST_MAX = 30, ITEM_MAX = 40;
+
+/** "milk, eggs\nbread" → ["milk", "eggs", "bread"]: trimmed, one space, nothing empty. */
+export function listItems(text) {
+  return String(text || '').split(/[,\n]/).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+function listAnswer(list) {
+  const items = list.items.map((x) => x.text);
+  return json({ ...list, summary: items.length ? items.join(', ') : 'The list is empty.', names: items });
+}
+
+async function shopping(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const sender = noteSender(env.ADMIN_TOKEN, auth);
+  const list = (await env.CACHE.get('list', 'json')) || { items: [], at: 0 };
+  if (request.method === 'GET') {
+    if (sender === null && !(env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN))) return json({ error: 'token' }, 401);
+    return listAnswer(list);
+  }
+  if (sender === null) return json({ error: 'admin token' }, 401);
+  if (request.method === 'DELETE') {
+    await env.CACHE.delete('list');
+    return listAnswer({ items: [], at: 0 });
+  }
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'JSON body {"add": "..."} or {"done": "..."}' }, 400); }
+  const add = listItems(body && body.add), done = listItems(body && body.done).map((x) => x.toLowerCase());
+  if (!add.length && !done.length) return json({ error: 'nothing to add or tick off' }, 400);
+  if (add.some((x) => x.length > ITEM_MAX)) return json({ error: `at most ${ITEM_MAX} characters an item` }, 400);
+  let items = list.items.filter((x) => done.indexOf(x.text.toLowerCase()) < 0);
+  for (const text of add) {
+    if (!items.some((x) => x.text.toLowerCase() === text.toLowerCase())) items.push({ text, from: sender, at: Date.now() });
+  }
+  if (items.length > LIST_MAX) return json({ error: `at most ${LIST_MAX} items` }, 400);
+  const next = { items, at: Date.now() };
+  await env.CACHE.put('list', JSON.stringify(next));
+  return listAnswer(next);
+}
+
 // MARK: Sites (the monitoring Workers' last results, from their KV)
 
 /** [{name, ok, at, failing}] from SITES ("Name:BINDING,..."): each binding is a monitor's STATE KV ({sig, at} in "last"). */
@@ -527,13 +571,15 @@ export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-    const writesNote = path === '/v1/notes' && (request.method === 'POST' || request.method === 'DELETE');
-    if (request.method !== 'GET' && !writesNote) return json({ error: 'GET only' }, 405);
+    const writes = request.method === 'POST' || request.method === 'DELETE';
+    const writesNote = path === '/v1/notes' && writes;
+    if (request.method !== 'GET' && !writesNote && !(path === '/v1/list' && writes)) return json({ error: 'GET only' }, 405);
     if (!allowedIp(request, env)) return json({ error: 'not from an allowed address' }, 403);
     if (path === '/health') return json(await health(env));
     if (path === '/webos/apps.json' || path === '/webos/FreeMyTV.ipk') return homebrew(path, env);
 
     if (writesNote) return notes(request, env);
+    if (path === '/v1/list') return shopping(request, env);
     const auth = request.headers.get('Authorization') || '';
     if (!env.TV_TOKEN || !sameSecret(auth, 'Bearer ' + env.TV_TOKEN)) return json({ error: 'token' }, 401);
     try {

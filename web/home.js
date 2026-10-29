@@ -463,6 +463,24 @@
     box.appendChild(document.createTextNode(Islam.hijri(d).text));
   }
 
+  /** When to set off for Jumu'ah to be there for its adhan (the khutbah), or 0: only on Fridays, with a travel time. */
+  function leaveBy(p) {
+    var travel = CONFIG.islam && CONFIG.islam.travel;
+    return travel > 0 && p && p.key === 'dhuhr' && new Date(p.at).getDay() === 5 ? p.at - travel * 60000 : 0;
+  }
+
+  /** The bin to put out: {bin, today} from 4 pm the day before a collection until 10 am on the day, else null. */
+  function binDay(now) {
+    var b = CONFIG.bins, m = b && /^(\d{4})-(\d\d)-(\d\d)$/.exec(b.start);
+    if (!m || !b.cycle.length) return null;
+    var d = new Date(now), start = new Date(+m[1], +m[2] - 1, +m[3]);
+    var today = d.getHours() < 10, day = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (today ? 0 : 1));
+    if (!today && d.getHours() < 16) return null;
+    var n = Math.round((day - start) / 86400000);   // rounded: a clock change makes one day 23 or 25 hours
+    if (n < 0 || n % 7) return null;
+    return {bin: b.cycle[(n / 7) % b.cycle.length], today: today};
+  }
+
   /** One glass chip: a small coloured label, then the text (a string, or a function filling the chip). */
   function chip(q, kind, label, fill) {
     var c = el('span', 'chip ' + kind, q);
@@ -490,6 +508,9 @@
           when += '  ·  ' + (mins >= 60 ? trf('in {h} h {m} min', {h: Math.floor(mins / 60), m: mins % 60}) : trf('in {m} min', {m: mins}));
         }
         if (p.iqamah) when += (when ? '  ·  ' : '') + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
+        // Jumu'ah: when to set off for the khutbah (CONFIG.islam.travel, minutes to the mosque).
+        var leave = leaveBy(p);
+        if (leave > Date.now()) when += '  ·  ' + trf('Leave by {time}', {time: Data.time(leave)});
         chip(q, 'prayer', p.name, function (c) {
           c.appendChild(document.createTextNode(when + '  ·  '));
           moonAndHijri(c, new Date());
@@ -507,6 +528,11 @@
       for (e = 0; e < events.length && parts.length < 3; e++) if (!events[e].allDay) parts.push(Data.time(events[e].start) + ' ' + events[e].title);
       chip(q, 'agenda', tr('Today'), parts.join('  ·  '));
     }
+    var bin = binDay(Date.now());
+    if (bin) chip(q, 'bins', tr('Bins'), bin.today ? trf('{bin} today', {bin: bin.bin}) : trf('{bin} out tonight', {bin: bin.bin}));
+    var list = Data.shopping;
+    if (list.length) chip(q, 'list', tr('Shopping'), list.length > 4
+      ? list.slice(0, 3).join('  ·  ') + '  ·  ' + trf('+{n} more', {n: list.length - 3}) : list.join('  ·  '));
     if (Data.note) chip(q, 'note', Data.noteFrom ? trf('From {name}', {name: Data.noteFrom}) : tr('Note'), Data.note);
     var lit = lights.filter(function (l) { return l.on; });
     if (lit.length && !movie) chip(q, 'lights', tr('Lights'), lit.length === lights.length && lights.length > 1 ? tr('All on')
@@ -726,6 +752,7 @@
     drawerInputs = drawerItems.length;
     drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
     if (lights.length) drawerItems.push({label: tr('Lights'), symbol: 'sunny', run: openLights});
+    drawerItems.push({label: tr('Movie night'), symbol: 'play', run: movieNight});
     drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
     if (TV.canOpenSettings) drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
     var n = drawerItems.length, gap = 18, groupGap = 56, groups = drawerInputs > 0 && drawerInputs < n ? 2 : 1;
@@ -1162,6 +1189,13 @@
   function prayerAlert() {
     if (!(CONFIG.islam && CONFIG.islam.prayerAlert) || !Islam.on()) return;
     var now = Date.now(), p = Islam.next(now - 90000, +Prefs.latitude(), +Prefs.longitude());
+    // Friday: a reminder when it's time to set off for Jumu'ah.
+    var j = Islam.next(now, +Prefs.latitude(), +Prefs.longitude()), leave = leaveBy(j);
+    if (leave && now >= leave && now - leave < 90000 && alerted !== 'leave' + new Date(leave).toDateString()) {
+      alerted = 'leave' + new Date(leave).toDateString();
+      var go = trf('Time to leave for {prayer}', {prayer: j.name});
+      if (document.hidden) TV.notify(go); else toast(go);
+    }
     if (!p || p.key === 'sunrise' || p.at > now || now - p.at > 90000) return;
     var key = p.key + new Date(p.at).toDateString();
     if (alerted === key) return;
@@ -1999,6 +2033,13 @@
     for (var i = 0; i < pets.length; i++) {
       for (var j = 0; j < pets[i].photos.length; j++) own.splice(Math.min(own.length, (i + 1) * (j + 2)), 0, {own: true, src: pets[i].photos[j], pet: pets[i].name});
     }
+    // Taken this week in an earlier year: those first, captioned on the screensaver.
+    var now = Date.now(), then = [], rest = [];
+    for (var m = 0; m < own.length; m++) {
+      own[m].memory = onThisDay(own[m].src, now);
+      (own[m].memory ? then : rest).push(own[m]);
+    }
+    own = then.concat(rest);
     if (!own.length) return picks;
     var mix = CONFIG.photosMix, perPick = mix === 'mine' || !picks.length ? Infinity : mix === 'mostly' ? 3 : 1;
     if (perPick === Infinity) return own;
@@ -2012,14 +2053,48 @@
     return out;
   }
 
-  var saverUrl = '';
+  /** {years, today} when your photo was taken within 3 days of this date in an earlier year (its EXIF date), else null. */
+  function onThisDay(src, now) {
+    var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec((CONFIG.photoDays || {})[src] || '');
+    if (!m) return null;
+    var d = new Date(now), years = d.getFullYear() - +m[1];
+    var apart = Math.round((new Date(d.getFullYear(), +m[2] - 1, +m[3]) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    return years >= 1 && Math.abs(apart) <= 3 ? {years: years, today: apart === 0} : null;
+  }
+
+  function memoryText(m) {
+    return m.today ? plural('plural|one:{n} year ago today|other:{n} years ago today', m.years)
+      : plural('plural|one:{n} year ago this week|other:{n} years ago this week', m.years);
+  }
+
+  /**
+   * Movie night: the screensaver, with only films you can watch here, in a random order. OK watches the one showing
+   * (and turns on movie mode when there are lights), the arrows pick another, any other button closes.
+   */
+  var night = null;
+
+  function movieNight() {
+    var films = Data.showcase().filter(function (p) { return p.kind === 'movie' && p.backdrop && Data.usable(p.app); });
+    if (!films.length) { toast(tr('No films to pick from right now.')); return; }
+    for (var i = films.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1)), t = films[i];
+      films[i] = films[j];
+      films[j] = t;
+    }
+    night = films;
+    saverIndex = 0;
+    showSaver();
+  }
+
+  var saverUrl = '', saverNext = null;
 
   function showSaver() {
-    var photos = saverPhotos();
+    var photos = night || saverPhotos();
     saverOn = true;
     saverPick = null;
     var s = $('saver');
     s.innerHTML = '';
+    setClass(s, 'night', !!night);
     var a = el('div', 'photo', s), b = el('div', 'photo', s);
     el('div', 'shade', s);
     var clock = el('div', 'clock', s);
@@ -2056,11 +2131,12 @@
         back.style.backgroundRepeat = p.own ? 'no-repeat' : '';
         back.style.backgroundPosition = p.own ? 'center' : '';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
-        clock.children[2].textContent = p.pet ? '🐾 ' + p.pet : p.own ? '' : p.title;
+        clock.children[2].textContent = p.pet ? '🐾 ' + p.pet : p.memory ? memoryText(p.memory) : p.own ? '' : p.title;
         saverPick = p.own ? null : p;   // your own photo: OK only closes, like any other key
         // With Watch from the screensaver on, OK opens this title's app (any other key only closes).
-        var app = !p.own && Prefs.saverWatch() && Data.appFor(p.app);
-        hint.textContent = app ? trf('Press OK to watch on {app} · any other button to close', {app: app.title}) : '';
+        var app = !p.own && (night || Prefs.saverWatch()) && Data.appFor(p.app);
+        hint.textContent = night && app ? trf('Movie night · OK to watch on {app} · the arrows pick another', {app: app.title})
+          : app ? trf('Press OK to watch on {app} · any other button to close', {app: app.title}) : '';
         setTimeout(function () {
           setClass(back, 'on', true);
           setClass(front, 'on', false);
@@ -2069,8 +2145,10 @@
         }, 60);
       }
       tickSaverClock(clock);
-      saverTimer = setTimeout(next, 12000);
+      clearTimeout(saverTimer);
+      saverTimer = setTimeout(next, night ? 30000 : 12000);
     }
+    saverNext = next;
     setClass(s, 'on', true);
     next();
   }
@@ -2096,16 +2174,26 @@
 
   function hideSaver() {
     saverOn = false;
+    night = null;
     clearTimeout(saverTimer);
     setClass($('saver'), 'on', false);
   }
 
-  function poke(ok) {
+  function poke(k) {
     idleAt = Date.now();
     if (!saverOn) return false;
-    var app = ok && saverPick && Prefs.saverWatch() && Data.appFor(saverPick.app);
+    var ok = k === TV.keys.ok, picking = night;
+    if (picking && k === undefined) return true;   // the pointer moving doesn't end movie night
+    if (picking && (k === TV.keys.left || k === TV.keys.right || k === TV.keys.up || k === TV.keys.down)) {
+      if (saverNext) saverNext();
+      return true;
+    }
+    var app = ok && saverPick && (picking || Prefs.saverWatch()) && Data.appFor(saverPick.app);
     hideSaver();
-    if (app) launcher(app.id, app.title)();
+    if (app) {
+      if (picking && lights.length && !movie) toggleMovie();
+      launcher(app.id, app.title)();
+    }
     return true;
   }
 
@@ -2113,7 +2201,7 @@
 
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
-    if (poke(k === TV.keys.ok)) { e.preventDefault(); return; }   // the first press only wakes the screen (or OK watches)
+    if (poke(k)) { e.preventDefault(); return; }   // the first press only wakes the screen (or OK watches)
     if (typing(k)) return;
     if (k === TV.keys.left) move(-1, 0);
     else if (k === TV.keys.right) move(1, 0);

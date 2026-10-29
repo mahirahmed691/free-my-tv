@@ -218,6 +218,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #quotes .chip.prayer b { color: #1E8E3E; }
 #quotes .chip.love b { color: #D6336C; }
 #quotes .chip.lights b { color: #B7791F; }
+#quotes .chip.list b { color: #AF52DE; }
+#quotes .chip.bins b { color: #34A853; }
 .moonbox { display: inline-block; width: 0.95em; height: 0.95em; margin-right: 0.3em; vertical-align: -0.12em; }
 .moonbox svg { display: block; width: 100%; height: 100%; }
 #quotes .moonbox svg { width: 100%; height: 100%; margin: 0; vertical-align: top; }   /* not the coins' 15 px */
@@ -231,6 +233,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .night #quotes .chip.prayer b { color: #30D158; }
 .night #quotes .chip.love b { color: #FF6B9A; }
 .night #quotes .chip.lights b { color: #FFD60A; }
+.night #quotes .chip.list b { color: #BF5AF2; }
+.night #quotes .chip.bins b { color: #32D74B; }
 .night #quotes .chip.live b, .night #quotes .chip .late { color: #FF453A; }
 .night #quotes .chip.warn { background: rgba(255, 159, 10, 0.24); color: #FFC56B; }
 #dashboard .side.bad { color: #D70015; font-weight: 600; }
@@ -673,6 +677,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #saver .verse .love { margin-top: 18px; font-size: 24px; font-weight: 500; color: #FFB3C9; }
 #saver .verse .love:empty { display: none; }
 .lite #saver .verse { box-shadow: none; }
+#saver.night .verse { display: none; }
 
 /* MARK: - Toast */
 

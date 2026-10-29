@@ -443,6 +443,23 @@ var Data = (function () {
     });
   }
 
+  var shopping = [], shoppingAt = 0, fetchingShopping = false;
+
+  /** The shopping list the phones keep (the Worker's /v1/list), every 2 minutes. */
+  function refreshShopping() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.shopping || fetchingShopping || (now - shoppingAt < 120000 && now >= shoppingAt)) return;
+    fetchingShopping = true;
+    workerGet('/v1/list', function (err, body) {
+      fetchingShopping = false;
+      if (!err && !(body && body.names)) err = new Error((body && body.error) || 'no list');
+      noteFetch('list', err);
+      if (err) return;
+      shoppingAt = Date.now();
+      if (body.names.join('\n') !== shopping.join('\n')) { shopping = body.names; changed(); }
+    });
+  }
+
   // MARK: - Picks (TMDB)
 
   var KEY = Prefs.tmdbKey();
@@ -779,7 +796,7 @@ var Data = (function () {
     appFor: appFor,
     usable: usable,
     services: services,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshFootball(); refreshCalendar(); refreshSalah(); },
+    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshFootball(); refreshCalendar(); refreshSalah(); },
     /** Today's events still to come or under way ([{title, start, end, allDay}]), or []. */
     get agenda() {
       var now = Date.now();
@@ -795,6 +812,7 @@ var Data = (function () {
     get note() { return note || ''; },
     /** Who wrote it (the phone's name on the Worker), or ''. */
     get noteFrom() { return noteFrom; },
+    get shopping() { return shopping; },
     /** The GitHub counts while in work hours ({repos, builds, reviews, pullRequests, alerts}), else null. */
     get dashboard() { return WORKER.dashboard && inWorkHours(Date.now()) ? dash : null; },
     get dashboardAt() { return dashAt; },

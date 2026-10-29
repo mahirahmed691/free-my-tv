@@ -8,7 +8,7 @@
 #   make note MSG="..."         the note on the TV's home screen (through the Worker; no reinstall)
 #   make note-clear             remove it
 #   make revoke-phone [NAME=]   that phone's Shortcuts stop working (yours without NAME, NAME=Mariam hers)
-#   make new-phone-key [NAME=]  a fresh key for a phone (NAME=Mariam: hers), its two Shortcuts in out/shortcuts
+#   make new-phone-key [NAME=]  a fresh key for a phone (NAME=Mariam: hers), its Shortcuts (note, shopping list) in out/shortcuts
 #   make type TEXT="..."        types into the text field open on the TV (ENTER=1 presses Enter after)
 # Settings are in tv.properties (tracked); the keys stay in config.properties (gitignored).
 # Roll back: git checkout tv-YYYY-MM-DD-N && make install (code and settings both come back; the keys are today's).
