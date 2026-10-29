@@ -386,8 +386,9 @@
   function renderGreeting() {
     var names = CONFIG.greeting, h = new Date().getHours();
     var text = !names ? tr('For You')
-      : h >= 5 && h < 12 ? trf('Good morning, {names}', {names: names})
-      : h >= 12 && h < 18 ? trf('Good afternoon, {names}', {names: names})
+      : h < 5 ? trf('Good night, {names}', {names: names})
+      : h < 12 ? trf('Good morning, {names}', {names: names})
+      : h < 17 ? trf('Good afternoon, {names}', {names: names})
       : trf('Good evening, {names}', {names: names});
     if ($('title').textContent !== text) $('title').textContent = text;
   }
