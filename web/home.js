@@ -489,6 +489,7 @@
         });
       }
     }
+    if (movie) chip(q, 'lights', tr('Lights'), tr('Movie mode'));   // early: the one you'd want to see
     var foot = footballLine();
     if (foot && foot[2]) chip(q, foot[1] === 'late' ? 'live' : 'match', foot[1] === 'late' ? tr('Live') : tr('Match'), foot[0]);
     // Today's events still to come: all-day ones first, then up to three by time.
@@ -500,6 +501,9 @@
       chip(q, 'agenda', tr('Today'), parts.join('  ·  '));
     }
     if (Data.note) chip(q, 'note', tr('Note'), Data.note);
+    var lit = lights.filter(function (l) { return l.on; });
+    if (lit.length && !movie) chip(q, 'lights', tr('Lights'), lit.length === lights.length && lights.length > 1 ? tr('All on')
+      : lit.length > 2 ? trf('{n} on', {n: lit.length}) : trf('{names} on', {names: lit.map(function (l) { return l.name; }).join(', ')}));
     var wed = Islam.together(Date.now());
     if (wed) chip(q, 'love', tr('Married'), Islam.togetherText(wed));
     var t = Data.trains;
@@ -713,6 +717,7 @@
     }
     drawerInputs = drawerItems.length;
     drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
+    if (lights.length) drawerItems.push({label: tr('Lights'), symbol: 'sunny', run: openLights});
     drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
     if (TV.canOpenSettings) drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
     var n = drawerItems.length, gap = 18, groupGap = 56, groups = drawerInputs > 0 && drawerInputs < n ? 2 : 1;
@@ -895,8 +900,105 @@
     setClass($('citypick'), 'open', false);
     setClass($('keypick'), 'open', false);
     langHint = null;
+    sheet = 'settings';
     st.zone = Z.SHELF;
     updateFocus();
+  }
+
+  // MARK: - Lights: your Tapo lights (LG's service talks to them on your Wi-Fi), movie mode, and Maghrib's warm light
+
+  var lights = ((CONFIG.tapo && CONFIG.tapo.auth && CONFIG.tapo.lights) || []).map(function (l) {
+    return {name: l.name, ip: l.ip, on: false, brightness: 0, ok: false};
+  });
+  if (!TV.canLights) lights = [];
+  var movie = null, lightsAt = 0, MOVIE = {device_on: true, brightness: 12, color_temp: 2500};
+
+  /** Each light's state, again (every minute while the home screen shows, and when the sheet opens). */
+  function refreshLights(done) {
+    var left = lights.length;
+    if (!left) return;
+    lightsAt = Date.now();
+    lights.forEach(function (l) {
+      TV.light(l.ip, 'get_device_info', null, function (info) {
+        l.ok = !!info;
+        if (info) { l.on = !!info.device_on; l.brightness = info.brightness || 0; l.temp = info.color_temp || 0; l.hue = info.hue; l.sat = info.saturation; }
+        if (--left === 0) { renderQuotes(); if (done) done(); }
+      });
+    });
+  }
+
+  function setLight(l, params, done) {
+    TV.light(l.ip, 'set_device_info', params, function (info) {
+      l.ok = info !== null;
+      if (l.ok) {
+        if (params.device_on !== undefined) l.on = params.device_on;
+        if (params.brightness !== undefined) l.brightness = params.brightness;
+      }
+      if (done) done();
+      renderQuotes();
+      if (st.zone === Z.SETTINGS && sheet === 'lights') renderSettings();
+    });
+  }
+
+  /** Movie mode: every light dim and warm; again, each light back as it was. */
+  function toggleMovie() {
+    if (movie) {
+      var was = movie;
+      movie = null;
+      lights.forEach(function (l, i) {
+        var w = was[i];
+        // Back as it was: its white, or its colour (color_temp 0 is a colour light: its hue and saturation).
+        var back = w.temp ? {color_temp: w.temp} : w.hue !== undefined ? {hue: w.hue, saturation: w.sat, color_temp: 0} : {};
+        back.device_on = w.on;
+        if (w.on) back.brightness = w.brightness || 50;
+        setLight(l, back);
+      });
+      return;
+    }
+    movie = lights.map(function (l) { return {on: l.on, brightness: l.brightness, temp: l.temp, hue: l.hue, sat: l.sat}; });
+    lights.forEach(function (l) { setLight(l, MOVIE); });
+  }
+
+  function lightRows() {
+    var anyOn = lights.some(function (l) { return l.on; });
+    var rows = [
+      {label: tr('Movie mode'), toggle: !!movie, step: toggleMovie},
+      {label: tr('All lights'), toggle: anyOn, step: function () {
+        movie = null;
+        lights.forEach(function (l) { setLight(l, {device_on: !anyOn}); });
+      }}
+    ];
+    lights.forEach(function (l) {
+      rows.push({label: l.name, value: !l.ok ? tr('No answer') : l.on ? l.brightness + '%' : tr('Off'), dim: !l.ok,
+        ok: function () { if (l.ok) setLight(l, {device_on: !l.on}); },
+        step: function (d) {
+          if (!l.ok) return;
+          var b = Math.max(1, Math.min(100, (l.on ? l.brightness : 0) + d * 10));
+          setLight(l, {device_on: true, brightness: b});
+        }});
+    });
+    return rows;
+  }
+
+  function openLights() {
+    sheet = 'lights';
+    st.zone = Z.SETTINGS;
+    st.row = 0;
+    renderSettings();
+    setClass($('settings'), 'open', true);
+    updateFocus();
+    refreshLights(function () { if (st.zone === Z.SETTINGS && sheet === 'lights') renderSettings(); });
+  }
+
+  /** At Maghrib the lights that are on turn warm and soft, once (CONFIG.islam.prayerLights; the TV has to be on). */
+  var maghribDone = '';
+
+  function prayerLights() {
+    if (!lights.length || !(CONFIG.islam && CONFIG.islam.prayerLights) || !Islam.on() || movie) return;
+    var at = Islam.at('maghrib', new Date(), +Prefs.latitude(), +Prefs.longitude()), today = new Date().toDateString();
+    if (!at || maghribDone === today || Date.now() < at || Date.now() - at > 20 * 60000) return;
+    maghribDone = today;
+    lights.forEach(function (l) { if (l.on) setLight(l, {brightness: Math.min(l.brightness || 60, 45), color_temp: 2500}); });
   }
 
   // MARK: - Home Settings
@@ -973,10 +1075,10 @@
     var box = $('settings').firstChild;
     box.innerHTML = '';
     var title = el('div', 'title', box);
-    sym('settings', title);
-    title.appendChild(document.createTextNode(tr('Home Settings')));
+    sym(sheet === 'lights' ? 'sunny' : 'settings', title);
+    title.appendChild(document.createTextNode(sheet === 'lights' ? tr('Lights') : tr('Home Settings')));
     var list = el('div', 'list', box), holder = el('div', 'rows', list);
-    rowsNow = settingRows();
+    rowsNow = sheet === 'lights' ? lightRows() : settingRows();
     list.style.height = Math.min(rowsNow.length, 7) * 78 + 'px';
     for (var i = 0; i < rowsNow.length; i++) {
       var r = rowsNow[i], row = el('div', 'row' + (r.dim ? ' dim' : ''), holder, r.label);
@@ -989,11 +1091,14 @@
       }
       hover(row, Z.SETTINGS, i);
     }
-    el('div', 'hint', box, tr('OK or the arrows change the value.'));
+    el('div', 'hint', box, sheet === 'lights' ? tr('OK turns a light on or off; the arrows change its brightness.') : tr('OK or the arrows change the value.'));
     updateFocus();
   }
 
+  var sheet = 'settings';
+
   function openSettings() {
+    sheet = 'settings';
     st.zone = Z.SETTINGS;
     st.row = 0;
     renderSettings();
@@ -1532,7 +1637,7 @@
         if (others[st.grid]) launcher(others[st.grid].id, others[st.grid].title)();
         return;
       case Z.SETTINGS:
-        if (rowsNow[st.row]) { rowsNow[st.row].step(1); if (st.zone === Z.SETTINGS) renderSettings(); }
+        if (rowsNow[st.row]) { (rowsNow[st.row].ok || rowsNow[st.row].step)(1); if (st.zone === Z.SETTINGS) renderSettings(); }
         return;
       case Z.EDIT:
         editShelf(0);
@@ -1899,6 +2004,7 @@
     reset();
     loadApps(function () { renderShelf(); renderDrawer(); restInDrawer(); Data.refresh(); });
   }
+  refreshLights();
 
   window.addEventListener('resize', fit);
   document.addEventListener('webOSRelaunch', reopened);   // LG: opened again while running
@@ -1926,6 +2032,8 @@
     checkNight();
     Data.refresh();
     renderGreeting();
+    if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
+    prayerLights();
     if (!saverOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) showSaver();
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
   }, 30000);

@@ -1,10 +1,13 @@
 /*
- * Free My TV's service on LG webOS: one call to the TV's remote control API (127.0.0.1:3000) for the web app.
+ * Free My TV's service on LG webOS: one call to the TV's remote control API (127.0.0.1:3000) for the web app, and
+ * your Tapo lights on your Wi-Fi (TP-Link's KLAP; a page can't make those requests).
  * Newer webOS gives each app's page its own origin (file://io.freemytv-webos), and the API closes any connection
  * that isn't from file:// ("invalid origin"); from here the handshake says file://.
  * Plain ES5 with Node's net only: older webOS ships an old Node.
  */
 var net = require('net');
+var http = require('http');
+var crypto = require('crypto');
 var Service = require('webos-service');
 
 var service = new Service(require('./package.json').name);
@@ -104,5 +107,96 @@ service.register('ssap', function (message) {
       result.returnValue = true;
       message.respond(result);
     }
+  });
+});
+
+// MARK: - Tapo lights (KLAP, as python-kasa's klaptransport and scripts/tapo.py)
+
+var tapoSessions = {};
+
+function sha256() {
+  var h = crypto.createHash('sha256');
+  for (var i = 0; i < arguments.length; i++) h.update(arguments[i]);
+  return h.digest();
+}
+
+function tapoPost(ip, path, body, cookie, done) {
+  var req = http.request({host: ip, port: 80, method: 'POST', path: '/app/' + path,
+    headers: cookie ? {Cookie: cookie, 'Content-Length': body.length} : {'Content-Length': body.length}}, function (res) {
+    var chunks = [];
+    res.on('data', function (c) { chunks.push(c); });
+    res.on('end', function () {
+      var m = /TP_SESSIONID=([^;]+)/.exec(String(res.headers['set-cookie'] || ''));
+      done(res.statusCode === 200 ? null : new Error('HTTP ' + res.statusCode), Buffer.concat(chunks), m ? 'TP_SESSIONID=' + m[1] : cookie);
+    });
+  });
+  req.setTimeout(5000, function () { req.abort(); });
+  req.on('error', function (e) { done(e); });
+  req.end(body);
+}
+
+/** A new session with the light at ip: done(error, session). */
+function tapoHandshake(ip, auth, done) {
+  var local = crypto.randomBytes(16);
+  tapoPost(ip, 'handshake1', local, '', function (err, r, cookie) {
+    if (err || !r || r.length < 48) return done(err || new Error('handshake1'));
+    var remote = r.slice(0, 16);
+    if (!sha256(local, remote, auth).equals(r.slice(16, 48))) return done(new Error('login refused'));
+    tapoPost(ip, 'handshake2', sha256(remote, local, auth), cookie, function (err2) {
+      if (err2) return done(err2);
+      var iv = sha256(buffer('iv'), local, remote, auth);
+      done(null, {cookie: cookie, key: sha256(buffer('lsk'), local, remote, auth).slice(0, 16), iv: iv.slice(0, 12),
+        seq: iv.readInt32BE(28), sig: sha256(buffer('ldk'), local, remote, auth).slice(0, 28), at: Date.now()});
+    });
+  });
+}
+
+function tapoRequest(ip, s, body, done) {
+  s.seq = (s.seq + 1) | 0;
+  var seq = new Buffer(4);
+  seq.writeInt32BE(s.seq, 0);
+  var iv = Buffer.concat([s.iv, seq]);
+  var c = crypto.createCipheriv('aes-128-cbc', s.key, iv), data = Buffer.concat([c.update(buffer(body)), c.final()]);
+  tapoPost(ip, 'request?seq=' + s.seq, Buffer.concat([sha256(s.sig, seq, data), data]), s.cookie, function (err, out) {
+    if (err || !out || out.length < 48) return done(err || new Error('no answer'));
+    try {
+      var d = crypto.createDecipheriv('aes-128-cbc', s.key, iv);
+      done(null, JSON.parse(Buffer.concat([d.update(out.slice(32)), d.final()]).toString('utf8')));
+    } catch (e) { done(e); }
+  });
+}
+
+/** One request to a light, with its session kept for 10 minutes (and one new handshake when it has gone). */
+function tapo(ip, auth, method, params, done, again) {
+  var s = tapoSessions[ip];
+  if (!s || Date.now() - s.at > 600000) {
+    return tapoHandshake(ip, auth, function (err, fresh) {
+      if (err) return done(err);
+      tapoSessions[ip] = fresh;
+      tapo(ip, auth, method, params, done, true);
+    });
+  }
+  tapoRequest(ip, s, JSON.stringify({method: method, params: params || {}, request_time_milis: Date.now()}), function (err, answer) {
+    if ((err || (answer && answer.error_code)) && !again) {
+      delete tapoSessions[ip];
+      return tapo(ip, auth, method, params, done, true);
+    }
+    if (err) return done(err);
+    if (answer.error_code) return done(new Error('error ' + answer.error_code));
+    done(null, answer.result || {});
+  });
+}
+
+service.register('tapo', function (message) {
+  var p = message.payload || {};
+  // Only lights on your own network, and only their state: nothing else is asked of them.
+  if (!/^(192\.168|10)\.\d{1,3}\.\d{1,3}(\.\d{1,3})?$/.test(p.ip || '') || !/^[0-9a-f]{64}$/.test(p.auth || '') ||
+      (p.method !== 'get_device_info' && p.method !== 'set_device_info')) {
+    message.respond({returnValue: false, errorText: 'Not a light request'});
+    return;
+  }
+  tapo(p.ip, new Buffer(p.auth, 'hex'), p.method, p.params, function (err, result) {
+    if (err) message.respond({returnValue: false, errorText: String(err.message || err)});
+    else message.respond({returnValue: true, result: result});
   });
 });

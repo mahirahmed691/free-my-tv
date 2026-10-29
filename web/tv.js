@@ -419,6 +419,15 @@ var TV = (function () {
     finish();
   }
 
+  // The browser preview's lights: remembered while the page is open.
+  var previewLights = {};
+
+  function previewLight(ip, method, params, done) {
+    var l = previewLights[ip] || (previewLights[ip] = {device_on: ip.slice(-1) === '1', brightness: 60, color_temp: 2700});
+    if (method === 'set_device_info') for (var k in params) if (params.hasOwnProperty(k)) l[k] = params[k];
+    setTimeout(function () { done(samsung ? null : l); }, 120);
+  }
+
   // MARK: - The TV, whichever it is
 
   return {
@@ -429,6 +438,18 @@ var TV = (function () {
      * org.tizen.menu both answer success and nothing shows, and the remote API ignores MENU and HOME.
      */
     canOpenSettings: !tizen2,
+
+    /** Whether the Tapo lights can be reached (LG's service makes the requests; the browser preview pretends). */
+    canLights: webos || (!samsung && !webos),
+
+    /** One request to a Tapo light (get_device_info or set_device_info): done(result or null). */
+    light: function (ip, method, params, done) {
+      var auth = CONFIG.tapo && CONFIG.tapo.auth;
+      if (!webos) { previewLight(ip, method, params, done); return; }
+      luna('luna://' + self + '.service/tapo', {ip: ip, auth: auth, method: method, params: params || {}}, function (res) {
+        done(res && res.returnValue ? res.result : null);
+      });
+    },
 
     /** Installed apps, as the TV's launcher lists them: [{id, title, icon, color}]. */
     apps: function (done) {

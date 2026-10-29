@@ -226,5 +226,7 @@ var Islam = (function () {
   }
 
   return {on: function () { return !!(CONFIG.islam && CONFIG.islam.prayer); }, times: times, hijri: hijri, next: next, greeting: greeting,
+    /** `day`'s adhan for key (the mosque's when it has that day), in ms, or 0. */
+    at: function (key, day, lat, lon) { var t = dayTimes(day, lat, lon)[key]; return t ? t.adhan : 0; },
     moonSvg: moonSvg, moonPhase: moonPhase, together: together, togetherText: togetherText, verse: verse};
 })();

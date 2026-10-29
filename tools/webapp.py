@@ -82,7 +82,13 @@ def read_config(path):
         'islam': {'prayer': values.get('prayer', 'false').lower() == 'true', 'method': values.get('prayer_method', 'MWL') or 'MWL',
                   'asr': values.get('asr', 'standard') or 'standard', 'hijriAdjust': int(values.get('hijri_adjust', '0') or 0),
                   # Your wedding day (YYYY-MM-DD; config.properties keeps it out of git): the Married chip and anniversaries.
-                  'married': values.get('married', '')},
+                  'married': values.get('married', ''),
+                  # Maghrib's warm light: the Tapo lights that are on turn warm and soft at Maghrib (the TV has to be on).
+                  'prayerLights': values.get('prayer_lights', 'false').lower() == 'true'},
+        # Your Tapo lights (scripts/tapo.py writes both to config.properties): the login's hash and "Name@IP" each.
+        'tapo': {'auth': values.get('tapo_auth', ''),
+                 'lights': [{'name': x.rpartition('@')[0], 'ip': x.rpartition('@')[2]}
+                            for x in values.get('tapo_lights', '').split(',') if '@' in x]},
         # Your photos on the screensaver (scripts/tv_photos.py puts them in out/photos): half, mostly or mine.
         'photosDir': values.get('photos_dir', ''), 'photosMix': values.get('photos_mix', 'half') or 'half',
         # What was built, for About this TV (written by scripts/tvconfig.py; empty otherwise).

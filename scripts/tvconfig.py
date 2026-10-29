@@ -18,7 +18,7 @@ SECRETS = os.path.join(ROOT, 'config.properties')
 OUT = os.path.join(ROOT, 'out', 'effective.properties')
 # Secrets, and private details that stay out of the public repo (married: your wedding day).
 SECRET_KEYS = ('tmdb_key', 'watchmode_key', 'plex_url', 'plex_token', 'worker_token', 'worker_admin_token', 'worker_phone_token',
-               'married')
+               'married', 'tapo_auth', 'tapo_lights')
 
 
 def read(path):
