@@ -11,7 +11,9 @@ import { eventsBetween, dayBounds } from './ics.js';
  *   GET /v1/trains      the next departures from TRAINS_CRS (Huxley2's National Rail feed; Cloudflare caches 60 s)
  *   GET /v1/notes       the note shown on the TV; POST {"text"} or DELETE it with ADMIN_TOKEN (make note)
  *   GET /v1/list        the shopping list (the TV, or a phone's ADMIN_TOKEN); POST {"add"} or {"done"} (comma or line
- *                       separated) or DELETE it with ADMIN_TOKEN (the phones' Shortcuts)
+ *                       separated) or DELETE it with ADMIN_TOKEN (the phones' Shortcuts); the TV may only tick off
+ *   GET /v1/fed         when the cats were last fed and by whom; POST (a phone's ADMIN_TOKEN) says they just were
+ *   GET /v1/warnings    the Met Office's weather warnings for WARNINGS_REGION (nw: North West England; 10 min cache)
  *   GET /v1/football    FOOTBALL_TEAM's live match, next fixture and last result (football-data.org, 5 min cache)
  *   GET /v1/calendar    today's events from CALENDAR_ICS (a calendar's secret iCal address; 10 min cache)
  *   GET /v1/salah       today's adhan and jamaat at your mosque, as it publishes them (SALAH_WIDGET, its ConnectMazjid
@@ -462,8 +464,10 @@ async function shopping(request, env) {
     if (sender === null && !(env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN))) return json({ error: 'token' }, 401);
     return listAnswer(list);
   }
-  if (sender === null) return json({ error: 'admin token' }, 401);
+  const tv = sender === null && env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN);
+  if (sender === null && !tv) return json({ error: 'admin token' }, 401);
   if (request.method === 'DELETE') {
+    if (tv) return json({ error: 'admin token' }, 401);
     await env.CACHE.delete('list');
     return listAnswer({ items: [], at: 0 });
   }
@@ -471,6 +475,7 @@ async function shopping(request, env) {
   try { body = await request.json(); } catch { return json({ error: 'JSON body {"add": "..."} or {"done": "..."}' }, 400); }
   const add = listItems(body && body.add), done = listItems(body && body.done).map((x) => x.toLowerCase());
   if (!add.length && !done.length) return json({ error: 'nothing to add or tick off' }, 400);
+  if (tv && add.length) return json({ error: 'the TV only ticks off' }, 401);   // its token is on a shared screen
   if (add.some((x) => x.length > ITEM_MAX)) return json({ error: `at most ${ITEM_MAX} characters an item` }, 400);
   let items = list.items.filter((x) => done.indexOf(x.text.toLowerCase()) < 0);
   for (const text of add) {
@@ -480,6 +485,48 @@ async function shopping(request, env) {
   const next = { items, at: Date.now() };
   await env.CACHE.put('list', JSON.stringify(next));
   return listAnswer(next);
+}
+
+// MARK: Fed (the cats: a phone's Shortcut says they're fed; the TV asks at mealtimes)
+
+async function fed(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const sender = noteSender(env.ADMIN_TOKEN, auth);
+  if (request.method === 'GET') {
+    if (sender === null && !(env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN))) return json({ error: 'token' }, 401);
+    return json((await env.CACHE.get('fed', 'json')) || { at: 0, from: '' });
+  }
+  if (sender === null) return json({ error: 'admin token' }, 401);
+  const entry = { at: Date.now(), from: sender, summary: 'Noted: fed' + (sender ? ' by ' + sender : '') + '.' };
+  await env.CACHE.put('fed', JSON.stringify(entry));
+  return json(entry);
+}
+
+// MARK: Weather warnings (the Met Office's RSS for a region)
+
+const WARNINGS_FRESH = 10 * 60000;
+
+function unescapeXml(s) {
+  return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** [{title, level, description}] from the feed's items (none when there are no warnings). */
+export function parseWarnings(xml) {
+  return (String(xml).match(/<item>[\s\S]*?<\/item>/g) || []).map((item) => {
+    const tag = (name) => { const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(item); return m ? unescapeXml(m[1]) : ''; };
+    const title = tag('title');
+    const level = (/^(yellow|amber|red)\b/i.exec(title) || [])[1] || '';
+    return { title, level: level.toLowerCase(), description: tag('description').slice(0, 300) };
+  }).filter((w) => w.title);
+}
+
+async function warnings(env) {
+  const region = (env.WARNINGS_REGION || 'nw').replace(/[^a-z]/g, '');
+  const r = await fetch(`https://www.metoffice.gov.uk/public/data/PWSCache/WarningsRSS/Region/${region}`,
+    { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; freemytv-bff)' } });
+  if (!r.ok) throw new Error(`Met Office HTTP ${r.status}`);
+  return { region, warnings: parseWarnings(await r.text()) };
 }
 
 // MARK: Sites (the monitoring Workers' last results, from their KV)
@@ -573,13 +620,14 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const writes = request.method === 'POST' || request.method === 'DELETE';
     const writesNote = path === '/v1/notes' && writes;
-    if (request.method !== 'GET' && !writesNote && !(path === '/v1/list' && writes)) return json({ error: 'GET only' }, 405);
+    if (request.method !== 'GET' && !writesNote && !((path === '/v1/list' || path === '/v1/fed') && writes)) return json({ error: 'GET only' }, 405);
     if (!allowedIp(request, env)) return json({ error: 'not from an allowed address' }, 403);
     if (path === '/health') return json(await health(env));
     if (path === '/webos/apps.json' || path === '/webos/FreeMyTV.ipk') return homebrew(path, env);
 
     if (writesNote) return notes(request, env);
     if (path === '/v1/list') return shopping(request, env);
+    if (path === '/v1/fed') return fed(request, env);
     const auth = request.headers.get('Authorization') || '';
     if (!env.TV_TOKEN || !sameSecret(auth, 'Bearer ' + env.TV_TOKEN)) return json({ error: 'token' }, 401);
     try {
@@ -587,6 +635,10 @@ export default {
       if (path === '/v1/football') {
         if (!env.FOOTBALL_KEY) return json({ error: 'no FOOTBALL_KEY' }, 503);
         const c = await cached(env, 'football', FOOTBALL_FRESH, () => football(env));
+        return json({ ...c.data, fetchedAt: c.fetchedAt, stale: c.stale, error: c.error });
+      }
+      if (path === '/v1/warnings') {
+        const c = await cached(env, 'warnings', WARNINGS_FRESH, () => warnings(env));
         return json({ ...c.data, fetchedAt: c.fetchedAt, stale: c.stale, error: c.error });
       }
       if (path === '/v1/calendar') {

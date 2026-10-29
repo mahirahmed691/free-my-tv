@@ -53,6 +53,10 @@ var Prefs = (function () {
     weather: function () { return pick('weather', true); },
     /** OK on the screensaver opens the title it shows, in its app; any other key only closes it (off by default). */
     saverWatch: function () { return pick('saverWatch', false) === true; },
+    /** Movie night's films you've watched or said you've seen ("movie:123"), newest last. */
+    seen: function () { return pick('seen', []); },
+    /** The day the morning briefing last showed ("Thu Oct 29 2026"). */
+    briefed: function () { return pick('briefed', ''); },
     /** The weather card's forecast: 'hours' (the next 6 hours) or 'days' (the next 5 days). */
     forecast: function () { return pick('forecast', 'hours') === 'days' ? 'days' : 'hours'; },
     quotes: function () { return pick('quotes', CONFIG.showCrypto !== false); },
@@ -94,10 +98,12 @@ var Data = (function () {
   function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.' + key)); } catch (e) { return null; } }
 
   /** GET a JSON document; done(error, json). */
-  function get(url, headers, done) {
+  function get(url, headers, done) { request('GET', url, headers, null, done); }
+
+  function request(method, url, headers, body, done) {
     var x = new XMLHttpRequest();
     var over = false;
-    x.open('GET', url, true);
+    x.open(method, url, true);
     x.timeout = 10000;
     for (var h in headers) if (headers.hasOwnProperty(h)) x.setRequestHeader(h, headers[h]);
     x.onreadystatechange = function () {
@@ -109,7 +115,7 @@ var Data = (function () {
       done(null, json);
     };
     x.ontimeout = x.onerror = function () { if (!over) { over = true; done(new Error('no connection')); } };
-    x.send();
+    x.send(body);
   }
 
   /** The last failure per source, for About this TV; a success clears it. */
@@ -125,7 +131,7 @@ var Data = (function () {
   // Both forecasts in one answer, the next 48 hours and today plus 5 days: Home Settings → Forecast switches without
   // asking again, and offline too.
   var QUERY = '&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code'
-      + '&hourly=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=6&forecast_hours=48';
+      + '&hourly=temperature_2m,weather_code,is_day,precipitation_probability&timezone=auto&forecast_days=6&forecast_hours=48';
   var weather = null, weatherAt = 0, fetchingWeather = false;
   (function () {
     var w = stored('weather');
@@ -149,6 +155,12 @@ var Data = (function () {
       sunrise: localTime(dl.sunrise[0], off), sunset: localTime(dl.sunset[0], off), hours: [], days: []
     };
     var hr = o.hourly;
+    // The first hour of the next 12 likely to rain (60% or more): "Rain from 4 PM" in the morning.
+    w.rain = 0;
+    for (var r = 0; hr && hr.precipitation_probability && r < hr.time.length && !w.rain; r++) {
+      var rat = localTime(hr.time[r], off);
+      if (rat > now - 3600000 && rat < now + 12 * 3600000 && hr.precipitation_probability[r] >= 60) w.rain = Math.max(rat, now);
+    }
     for (var i = 0; hr && i < hr.time.length && w.hours.length < 6; i++) {
       var at = localTime(hr.time[i], off);
       if (at <= now) continue;
@@ -460,6 +472,84 @@ var Data = (function () {
     });
   }
 
+  /** Ticks items off the list from the TV (the one write its token may make), then shows the list again. */
+  function tickOff(names, done) {
+    request('POST', WORKER.url.replace(/\/+$/, '') + '/v1/list', {Authorization: 'Bearer ' + WORKER.token, 'Content-Type': 'application/json'},
+      JSON.stringify({done: names.join('\n')}), function (err, body) {
+        if (!err && body && body.names) { shopping = body.names; shoppingAt = Date.now(); changed(); }
+        done(err);
+      });
+  }
+
+  var fed = null, fedAt = 0, fetchingFed = false;
+
+  /** When the cats were last fed (a phone's "Fed the cats"), every 2 minutes; only with pets and the Worker. */
+  function refreshFed() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.fed || fetchingFed || (now - fedAt < 120000 && now >= fedAt)) return;
+    fetchingFed = true;
+    workerGet('/v1/fed', function (err, body) {
+      fetchingFed = false;
+      noteFetch('fed', err);
+      if (err || !body) return;
+      fedAt = Date.now();
+      if (!fed || fed.at !== body.at) { fed = body; changed(); }
+    });
+  }
+
+  var warnings = [], warningsAt = 0, fetchingWarnings = false;
+
+  /** The Met Office's warnings for the region, every 10 minutes. */
+  function refreshWarnings() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.warnings || fetchingWarnings || (now - warningsAt < 10 * 60000 && now >= warningsAt)) return;
+    fetchingWarnings = true;
+    workerGet('/v1/warnings', function (err, body) {
+      fetchingWarnings = false;
+      if (!err && !(body && body.warnings)) err = new Error((body && body.error) || 'no warnings');
+      noteFetch('warnings', err);
+      if (err) return;
+      warningsAt = Date.now();
+      var was = warnings.map(function (w) { return w.title; }).join('|');
+      warnings = body.warnings;
+      if (was !== warnings.map(function (w) { return w.title; }).join('|')) changed();
+    });
+  }
+
+  var episodes = [], episodesAt = 0, fetchingEpisodes = false;
+
+  /**
+   * The shows you follow (tv.properties follow_shows) with an episode out today or tomorrow: [{show, at, season,
+   * episode}], from TMDB's next and last episodes, every 6 hours.
+   */
+  function refreshEpisodes() {
+    var names = CONFIG.followShows || [], now = Date.now();
+    if (!names.length || !KEY || fetchingEpisodes || (now - episodesAt < 6 * 3600000 && now >= episodesAt)) return;
+    fetchingEpisodes = true;
+    var found = [], today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+    each(names, function (name, next) {
+      tmdb('/search/tv?query=' + encodeURIComponent(name), function (e, r) {
+        var id = !e && r.results && r.results[0] && r.results[0].id;
+        if (!id) { next(); return; }
+        tmdb('/tv/' + id, function (e2, o) {
+          var eps = !e2 && o ? [o.last_episode_to_air, o.next_episode_to_air] : [];
+          for (var i = 0; i < eps.length; i++) {
+            var x = eps[i], m = x && /^(\d{4})-(\d\d)-(\d\d)$/.exec(x.air_date || '');
+            if (!m) continue;
+            var day = new Date(+m[1], m[2] - 1, +m[3]).getTime();
+            if (day >= today && day <= today + 86400000) found.push({show: o.name, today: day === today, season: x.season_number, episode: x.episode_number});
+          }
+          next();
+        });
+      });
+    }, function () {
+      fetchingEpisodes = false;
+      episodesAt = Date.now();
+      episodes = found;
+      changed();
+    });
+  }
+
   // MARK: - Picks (TMDB)
 
   var KEY = Prefs.tmdbKey();
@@ -623,6 +713,7 @@ var Data = (function () {
       if (p.kind === 'tv') parts.push(tr('Series'));
       if (o.genres && o.genres.length) {
         parts.push(genre(o.genres[0].name));
+        p.genres = o.genres.map(function (g) { return g.id; });
       }
       if (p.kind === 'movie' && o.runtime > 0) {
         var h = Math.floor(o.runtime / 60), m = o.runtime % 60;
@@ -671,7 +762,8 @@ var Data = (function () {
   function addPick(list, o, kind) {
     if (!o.backdrop_path) return;
     if (CONFIG.hideAnimation && animated(o)) return;
-    list.push({id: o.id, kind: kind, title: kind === 'movie' ? o.title : o.name, backdrop: o.backdrop_path, poster: o.poster_path || '', meta: '', app: null, detailed: false});
+    list.push({id: o.id, kind: kind, title: kind === 'movie' ? o.title : o.name, backdrop: o.backdrop_path, poster: o.poster_path || '', meta: '', app: null, detailed: false,
+      genres: o.genre_ids || [], rating: o.vote_average || 0});
   }
 
   function keyOf(p) { return p.kind + ':' + p.id; }
@@ -796,7 +888,7 @@ var Data = (function () {
     appFor: appFor,
     usable: usable,
     services: services,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshFootball(); refreshCalendar(); refreshSalah(); },
+    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshFed(); refreshWarnings(); refreshEpisodes(); refreshFootball(); refreshCalendar(); refreshSalah(); },
     /** Today's events still to come or under way ([{title, start, end, allDay}]), or []. */
     get agenda() {
       var now = Date.now();
@@ -813,6 +905,10 @@ var Data = (function () {
     /** Who wrote it (the phone's name on the Worker), or ''. */
     get noteFrom() { return noteFrom; },
     get shopping() { return shopping; },
+    tickOff: tickOff,
+    get fed() { return fed; },
+    get warnings() { return warnings; },
+    get episodes() { return episodes; },
     /** The GitHub counts while in work hours ({repos, builds, reviews, pullRequests, alerts}), else null. */
     get dashboard() { return WORKER.dashboard && inWorkHours(Date.now()) ? dash : null; },
     get dashboardAt() { return dashAt; },

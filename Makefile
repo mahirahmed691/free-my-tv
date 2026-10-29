@@ -68,6 +68,7 @@ release:
 	@tag=$$(cat out/release-tag); hash=$$($(PYTHON) scripts/tvconfig.py hash) || exit 1; \
 	git tag -a "$$tag" -m "Installed on $(TV)" -m "config-sha256: $$hash" -m "version: $$(cat out/release-version)" && rm out/release-tag && echo "Tagged $$tag (config $$hash)"
 	@$(PYTHON) scripts/publish_repo.py "$$(cat out/release-version)" && rm -f out/release-version
+	@$(PYTHON) scripts/devmode_reminder.py "$$(cat out/devmode-until 2>/dev/null)" || true
 
 # Your Tapo lights: the TP-Link login once (only its hash is kept, in config.properties), then the lights it found.
 tapo-login:

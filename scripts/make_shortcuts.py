@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """iPhone Shortcuts for the TV: "Note to TV" (asks, then sends), "Clear TV note", and for the shopping list "Add to TV
-list" (asks: one item, or several with commas) and "TV shopping list" (shows it; the ones you pick are ticked off).
+list" (asks: one item, or several with commas) and "TV shopping list" (shows it; the ones you pick are ticked off), and
+"Fed the cats" (the TV stops asking until the next meal).
 
     python3 scripts/make_shortcuts.py    # → out/shortcuts/*.shortcut, signed; AirDrop them to the phone
 
@@ -94,12 +95,16 @@ def main():
     done = request(lst, 'POST', token, [('done', output_of(uid(pick), 'Chosen Item'))])
     left = action('is.workflow.actions.getvalueforkey', WFInput=variable(uid(done), 'Contents of URL'), WFDictionaryKey='summary')
     shown_left = action('is.workflow.actions.showresult', Text=output_of(uid(left), 'Dictionary Value'))
+    feed = request(url.rstrip('/') + '/v1/fed', 'POST', token, [('fed', text('yes'))])
+    noted = action('is.workflow.actions.getvalueforkey', WFInput=variable(uid(feed), 'Contents of URL'), WFDictionaryKey='summary')
+    shown_fed = action('is.workflow.actions.showresult', Text=output_of(uid(noted), 'Dictionary Value'))
 
     os.makedirs(out, exist_ok=True)
     for name, flow in [('Note to TV', workflow([ask, send, shown], 59511, 4282601983)),
                        ('Clear TV note', workflow([clear, cleared], 59446, 4271458815)),
                        ('Add to TV list', workflow([item, add, added, shown_list], 59511, 2846468607)),
-                       ('TV shopping list', workflow([read, names, pick, done, left, shown_left], 59511, 2846468607))]:
+                       ('TV shopping list', workflow([read, names, pick, done, left, shown_left], 59511, 2846468607)),
+                       ('Fed the cats', workflow([feed, noted, shown_fed], 59446, 4251333119))]:
         raw = os.path.join(out, name + ' (unsigned).shortcut')
         signed = os.path.join(out, name + '.shortcut')
         fd = os.open(raw, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

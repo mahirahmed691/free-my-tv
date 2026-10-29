@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems, parseWarnings } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -272,6 +272,33 @@ test('list: phones add and tick off (named), the TV reads, only ADMIN_TOKEN writ
   assert.equal((await req('/v1/list', { method: 'POST', token: 'his-token', body: {} })).status, 400);
   r = await (await req('/v1/list', { method: 'DELETE', token: 'her-token' })).json();
   assert.equal(r.summary, 'The list is empty.');
+});
+
+test('list: the TV may tick off, never add or clear', async () => {
+  env.ADMIN_TOKEN = 'Mariam=her-token';
+  await req('/v1/list', { method: 'POST', token: 'her-token', body: { add: 'milk, eggs' } });
+  assert.equal((await req('/v1/list', { method: 'POST', body: { add: 'crisps' } })).status, 401);
+  assert.equal((await req('/v1/list', { method: 'DELETE' })).status, 401);
+  const r = await (await req('/v1/list', { method: 'POST', body: { done: 'milk' } })).json();
+  assert.deepEqual(r.names, ['eggs']);
+});
+
+test('fed: a phone says the cats are fed (signed), the TV reads', async () => {
+  env.ADMIN_TOKEN = 'Mariam=her-token';
+  assert.deepEqual(await (await req('/v1/fed')).json(), { at: 0, from: '' });
+  assert.equal((await req('/v1/fed', { method: 'POST' })).status, 401);                               // not the TV
+  const w = await (await req('/v1/fed', { method: 'POST', token: 'her-token' })).json();
+  assert.equal(w.from, 'Mariam');
+  assert.equal(w.summary, 'Noted: fed by Mariam.');
+  assert.ok((await (await req('/v1/fed')).json()).at > 0);
+});
+
+test('warnings: the Met Office feed\'s items, with their level', () => {
+  const xml = `<rss><channel><title>x</title><item><title>Yellow warning of wind affecting North West England</title>
+    <description><![CDATA[Strong winds &amp; gusts <b>60 mph</b>. valid from 0600 Wed 28 Oct to 2100 Wed 28 Oct]]></description></item></channel></rss>`;
+  assert.deepEqual(parseWarnings(xml), [{ title: 'Yellow warning of wind affecting North West England', level: 'yellow',
+    description: 'Strong winds & gusts 60 mph. valid from 0600 Wed 28 Oct to 2100 Wed 28 Oct' }]);
+  assert.deepEqual(parseWarnings('<rss><channel><title>none</title></channel></rss>'), []);
 });
 
 test('notes: a named key signs the note; an unnamed one leaves it unsigned', async () => {

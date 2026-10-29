@@ -24,8 +24,16 @@ function frame(text) {
   return Buffer.concat([buffer(n < 126 ? [0x81, 0x80 | n] : [0x81, 0xfe, n >> 8, n & 0xff]), mask, data]);
 }
 
+// The only calls the page may make, each with the one permission it needs (its own key: a "no" to one isn't a "no" to
+// the other): the app list, and Goodnight turning the TV off.
+var PERMISSIONS = {
+  'com.webos.applicationManager/listLaunchPoints': ['READ_INSTALLED_APPS'],
+  'system/turnOff': ['CONTROL_POWER']
+};
+
 /** done({clientKey, payload}), {refused: true} when the person said no on the TV, or null. */
 function call(uri, clientKey, done) {
+  var permissions = PERMISSIONS[uri];
   var socket = net.connect(3000, '127.0.0.1'), buf = buffer([]), open = false, text = '', finished = false;
   var timer = setTimeout(function () { finish(null); }, 90000);   // time to answer the TV's prompt
   function finish(result) {
@@ -61,7 +69,7 @@ function call(uri, clientKey, done) {
       open = true;
       buf = buf.slice(end + 4);
       var payload = {forcePairing: false, pairingType: 'PROMPT',
-        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS']}};
+        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: permissions}};
       if (clientKey) payload['client-key'] = clientKey;
       send({type: 'register', id: 'register', payload: payload});
     }
@@ -96,9 +104,9 @@ function call(uri, clientKey, done) {
 
 service.register('ssap', function (message) {
   var p = message.payload || {};
-  // Only the app list, the one call the page makes: nothing else goes to the TV's API, nor gets its client key.
-  if (p.uri !== 'com.webos.applicationManager/listLaunchPoints') {
-    message.respond({returnValue: false, errorText: 'Only listLaunchPoints'});
+  // Only the calls in PERMISSIONS: nothing else goes to the TV's API, nor gets its client key.
+  if (!PERMISSIONS.hasOwnProperty(p.uri)) {
+    message.respond({returnValue: false, errorText: 'Only listLaunchPoints and system/turnOff'});
     return;
   }
   call(p.uri, p.clientKey, function (result) {

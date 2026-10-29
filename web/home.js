@@ -385,16 +385,20 @@
 
   /** "Good evening, Mahir & Mariam" (tv.properties: greeting) in place of "For You", by the hour. */
   function renderGreeting() {
+    var text = greetingText();
+    var t = $('title').firstChild;
+    if (t.textContent !== text) t.textContent = text;
+    renderPets();
+  }
+
+  function greetingText() {
     var names = CONFIG.greeting, h = new Date().getHours();
-    var text = !names ? tr('For You')
+    return !names ? tr('For You')
       : Islam.on() && Islam.greeting(names, Date.now()) ? Islam.greeting(names, Date.now())
       : h < 5 ? trf('Good night, {names}', {names: names})
       : h < 12 ? trf('Good morning, {names}', {names: names})
       : h < 17 ? trf('Good afternoon, {names}', {names: names})
       : trf('Good evening, {names}', {names: names});
-    var t = $('title').firstChild;
-    if (t.textContent !== text) t.textContent = text;
-    renderPets();
   }
 
   var petsShown = '';
@@ -481,6 +485,69 @@
     return {bin: b.cycle[(n / 7) % b.cycle.length], today: today};
   }
 
+  /** "Yellow warning of wind": the Met Office's title without the region (all of them are for this one). */
+  function shortWarning(title) { return title.replace(/\s+affecting\s.*$/i, ''); }
+
+  /** "From 4 PM: take a coat" in the morning (5 to 12) when rain is likely in the next 12 hours, else ''. */
+  function rainLine() {
+    var w = Data.weather, h = new Date().getHours();
+    if (!w || !w.rain || h < 5 || h >= 12) return '';
+    return w.rain - Date.now() < 30 * 60000 ? tr('Rain now: take a coat') : trf('Rain from {time}: take a coat', {time: Data.time(w.rain)});
+  }
+
+  /** At the cats' mealtimes (6 to 11, 17 to 22): [their names, "Not fed yet" or when and who], else null. */
+  function fedLine() {
+    var pets = CONFIG.pets || [];
+    if (!pets.length || !(CONFIG.worker && CONFIG.worker.fed) || !Data.fed) return null;
+    var d = new Date(), h = d.getHours();
+    if (!(h >= 6 && h < 11) && !(h >= 17 && h < 22)) return null;
+    var meal = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h < 12 ? 6 : 17).getTime(), f = Data.fed;
+    var names = pets.map(function (p) { return p.name; }).join(' & ');
+    if (f.at < meal) return [names, tr('Not fed yet')];
+    return [names, f.from ? trf('Fed at {time} by {name}', {time: Data.time(f.at), name: f.from}) : trf('Fed at {time}', {time: Data.time(f.at)})];
+  }
+
+  var countdownDay = '', countdownList = [];
+
+  /**
+   * "Eid al-Fitr in 12 days": the nearest of the Eids, Ramadan, your anniversary and tv.properties' countdowns, within
+   * 60 days (on the day itself the greeting says it). Worked out once a day.
+   */
+  function nextCountdown(now) {
+    var today = new Date(now);
+    today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (countdownDay !== today.toDateString()) {
+      countdownDay = today.toDateString();
+      countdownList = [];
+      var own = CONFIG.countdowns || [];
+      for (var i = 0; i < own.length; i++) {
+        var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(own[i].date);
+        if (m) countdownList.push({name: own[i].name, at: new Date(+m[1], m[2] - 1, +m[3]).getTime()});
+      }
+      var wed = /^(\d{4})-(\d\d)-(\d\d)$/.exec((CONFIG.islam && CONFIG.islam.married) || '');
+      if (wed) {
+        var a = new Date(today.getFullYear(), wed[2] - 1, +wed[3]);
+        if (a < today) a = new Date(today.getFullYear() + 1, wed[2] - 1, +wed[3]);
+        countdownList.push({name: tr('Anniversary'), at: a.getTime()});
+      }
+      if (Islam.on()) {
+        var want = [[9, 1, tr('Ramadan')], [10, 1, tr('Eid al-Fitr')], [12, 10, tr('Eid al-Adha')]];
+        for (var n = 1; n <= 60; n++) {
+          var day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n), h = Islam.hijri(day);
+          for (var k = 0; k < want.length; k++) if (h.month === want[k][0] && h.day === want[k][1]) countdownList.push({name: want[k][2], at: day.getTime()});
+        }
+      }
+      countdownList.sort(function (x, y) { return x.at - y.at; });
+    }
+    for (var c = 0; c < countdownList.length; c++) {
+      var days = Math.round((countdownList[c].at - today.getTime()) / 86400000);
+      if (days < 1 || days > 60) continue;
+      return days === 1 ? trf('{name} tomorrow', {name: countdownList[c].name})
+        : plural('plural|one:{name} in {n} day|other:{name} in {n} days', days).replace('{name}', countdownList[c].name);
+    }
+    return '';
+  }
+
   /** One glass chip: a small coloured label, then the text (a string, or a function filling the chip). */
   function chip(q, kind, label, fill) {
     var c = el('span', 'chip ' + kind, q);
@@ -496,6 +563,11 @@
   function renderExtras(q) {
     var warn = devModeWarning();
     if (warn) chip(q, 'warn', '', warn);
+    // The Met Office's warnings for the region (yellow, amber or red), first: the one chip that can't wait.
+    var ws = Data.warnings;
+    for (var wi = 0; wi < ws.length && wi < 2; wi++) chip(q, 'warn', tr('Weather warning'), shortWarning(ws[wi].title));
+    var rain = rainLine();
+    if (rain) chip(q, 'rain', tr('Rain'), rain);
     if (Islam.on()) {
       var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude());
       if (p) {
@@ -528,6 +600,12 @@
       for (e = 0; e < events.length && parts.length < 3; e++) if (!events[e].allDay) parts.push(Data.time(events[e].start) + ' ' + events[e].title);
       chip(q, 'agenda', tr('Today'), parts.join('  ·  '));
     }
+    var cats = fedLine();
+    if (cats) chip(q, 'love', cats[0], cats[1]);
+    var eps = Data.episodes;
+    for (var ei = 0; ei < eps.length && ei < 2; ei++) {
+      chip(q, 'agenda', tr('New episode'), eps[ei].today ? trf('{show} today', {show: eps[ei].show}) : trf('{show} tomorrow', {show: eps[ei].show}));
+    }
     var bin = binDay(Date.now());
     if (bin) chip(q, 'bins', tr('Bins'), bin.today ? trf('{bin} today', {bin: bin.bin}) : trf('{bin} out tonight', {bin: bin.bin}));
     var list = Data.shopping;
@@ -537,6 +615,8 @@
     var lit = lights.filter(function (l) { return l.on; });
     if (lit.length && !movie) chip(q, 'lights', tr('Lights'), lit.length === lights.length && lights.length > 1 ? tr('All on')
       : lit.length > 2 ? trf('{n} on', {n: lit.length}) : trf('{names} on', {names: lit.map(function (l) { return l.name; }).join(', ')}));
+    var count = nextCountdown(Date.now());
+    if (count) chip(q, 'prayer', tr('Countdown'), count);
     var wed = Islam.together(Date.now());
     if (wed) chip(q, 'love', tr('Married'), Islam.togetherText(wed));
     var t = Data.trains;
@@ -753,6 +833,8 @@
     drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
     if (lights.length) drawerItems.push({label: tr('Lights'), symbol: 'sunny', run: openLights});
     drawerItems.push({label: tr('Movie night'), symbol: 'play', run: movieNight});
+    if (CONFIG.worker && CONFIG.worker.shopping) drawerItems.push({label: tr('Shopping list'), symbol: 'check', run: openList});
+    drawerItems.push({label: tr('Goodnight'), symbol: 'bedtime', run: startGoodnight});
     drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
     if (TV.canOpenSettings) drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
     var n = drawerItems.length, gap = 18, groupGap = 56, groups = drawerInputs > 0 && drawerInputs < n ? 2 : 1;
@@ -1161,6 +1243,149 @@
     return rows;
   }
 
+  /** The shopping list on the TV: OK ticks an item off (the one write the TV's token may make). */
+  function listRows() {
+    var items = Data.shopping;
+    if (!items.length) return [{label: tr('The list is empty.'), value: '', dim: true, step: function () {}}];
+    return items.map(function (name) {
+      return {label: name, toggle: false, step: function () {}, ok: function () {
+        Data.tickOff([name], function (err) {
+          if (err) toast(tr('No connection right now.'));
+          if (st.zone === Z.SETTINGS && sheet === 'list') renderSettings();
+        });
+      }};
+    });
+  }
+
+  function openList() {
+    sheet = 'list';
+    st.zone = Z.SETTINGS;
+    st.row = 0;
+    renderSettings();
+    setClass($('settings'), 'open', true);
+    updateFocus();
+  }
+
+  // MARK: - Morning briefing: the first time the home screen shows each morning (5 to 12), one card with the day
+
+  var briefingTimer = 0;
+
+  function maybeBrief() {
+    var d = new Date(), h = d.getHours();
+    if (!CONFIG.briefing || h < 5 || h >= 12 || Prefs.briefed() === d.toDateString()) return;
+    if (document.hidden || saverOn || sheetOpen() || goodnightAt || !Data.weather) return;
+    Prefs.set('briefed', d.toDateString());
+    var box = $('briefing');
+    box.innerHTML = '';
+    var card = el('div', 'brief', box);
+    el('div', 'head', card, greetingText());
+    el('div', 'date', card, formatDate('format|EEEE, MMMM d', d.getTime()) + (Islam.on() ? '  ·  ' + Islam.hijri(d).text : ''));
+    function line(label, text) {
+      if (!text) return;
+      var r = el('div', 'line', card);
+      el('b', '', r, label);
+      r.appendChild(document.createTextNode(text));
+    }
+    var w = Data.weather;
+    line(tr('Weather'), Data.degrees(w.temp) + '  ' + Data.condition(w.code, w.isDay) + '  ·  ' + trf('H:{max}', {max: Data.degrees(w.max)})
+      + '  ' + trf('L:{min}', {min: Data.degrees(w.min)}) + (w.rain ? '  ·  ' + rainLine() : ''));
+    var ws = Data.warnings;
+    for (var i = 0; i < ws.length; i++) line(tr('Weather warning'), shortWarning(ws[i].title));
+    var parts = [], ev = Data.agenda;
+    for (var e = 0; e < ev.length && parts.length < 4; e++) parts.push(ev[e].allDay ? ev[e].title : Data.time(ev[e].start) + ' ' + ev[e].title);
+    line(tr('Today'), parts.join('  ·  '));
+    if (Islam.on()) {
+      var p = Islam.next(Date.now(), +Prefs.latitude(), +Prefs.longitude());
+      if (p) line(p.name, Data.time(p.at) + (p.iqamah ? '  ·  ' + trf('Jamaat {time}', {time: Data.time(p.iqamah)}) : '')
+        + (leaveBy(p) > Date.now() ? '  ·  ' + trf('Leave by {time}', {time: Data.time(leaveBy(p))}) : ''));
+    }
+    var t = Data.trains;
+    if (t && t.services && t.services.length) {
+      var tr2 = [];
+      for (var k = 0; k < t.services.length && k < 3; k++) tr2.push(t.services[k].destination + ' ' + t.services[k].std + (t.services[k].cancelled ? ' ' + tr('Cancelled') : ''));
+      line(tr('Trains'), tr2.join('  ·  '));
+    }
+    var cats = fedLine();
+    if (cats) line(cats[0], cats[1]);
+    line(tr('Shopping'), Data.shopping.slice(0, 6).join('  ·  '));
+    line(tr('Countdown'), nextCountdown(Date.now()));
+    if (Data.note) line(Data.noteFrom ? trf('From {name}', {name: Data.noteFrom}) : tr('Note'), Data.note);
+    el('div', 'hint', card, tr('Press any button to close'));
+    setClass(box, 'on', true);
+    clearTimeout(briefingTimer);
+    briefingTimer = setTimeout(closeBriefing, 90000);
+  }
+
+  function closeBriefing() {
+    var box = $('briefing');
+    if (!box || box.className.indexOf('on') < 0) return false;
+    clearTimeout(briefingTimer);
+    setClass(box, 'on', false);
+    return true;
+  }
+
+  // MARK: - Goodnight: the lights off and the TV off, after 30 seconds any button can stop
+
+  var goodnightAt = 0, goodnightTimer = 0;
+
+  function startGoodnight() {
+    goodnightAt = Date.now() + 30000;
+    tickGoodnight();
+  }
+
+  function tickGoodnight() {
+    clearTimeout(goodnightTimer);
+    var box = $('goodnight');
+    if (!goodnightAt) { setClass(box, 'on', false); return; }
+    var left = Math.ceil((goodnightAt - Date.now()) / 1000);
+    if (left <= 0) { goodnightAt = 0; setClass(box, 'on', false); goodnightNow(); return; }
+    box.innerHTML = '';
+    el('div', 'big', box, CONFIG.greeting ? trf('Goodnight, {names}', {names: CONFIG.greeting}) : tr('Goodnight'));
+    el('div', 'small', box, trf('The lights and the TV turn off in {n} s · any button stops it', {n: left}));
+    setClass(box, 'on', true);
+    goodnightTimer = setTimeout(tickGoodnight, 1000);
+  }
+
+  function cancelGoodnight() {
+    if (!goodnightAt) return false;
+    goodnightAt = 0;
+    tickGoodnight();
+    return true;
+  }
+
+  function goodnightNow() {
+    movie = null;
+    if (ambient) toggleAmbient();
+    lights.forEach(function (l) { if (l.on) setLight(l, {device_on: false}); });
+    // The lights' requests first, then the TV.
+    setTimeout(function () {
+      TV.powerOff(function (ok) { if (!ok) toast(tr("The TV didn't turn off: press the power button")); });
+    }, 1500);
+  }
+
+  // MARK: - The adhan out loud (your recording, adhan_file), at the prayers in CONFIG.adhan.prayers
+
+  var adhanAudio = null;
+
+  function playAdhan(key) {
+    var a = CONFIG.adhan;
+    if (!a || !a.src || a.prayers.indexOf(key) < 0 || document.hidden || adhanAudio) return;
+    try {
+      adhanAudio = new Audio(a.src);
+      adhanAudio.volume = Math.max(0, Math.min(100, a.volume)) / 100;
+      adhanAudio.onended = adhanAudio.onerror = function () { adhanAudio = null; };
+      adhanAudio.play();
+    } catch (e) { adhanAudio = null; }
+  }
+
+  /** Back (or any button) stops the adhan; true when it was playing. */
+  function stopAdhan() {
+    if (!adhanAudio) return false;
+    try { adhanAudio.pause(); } catch (e) {}
+    adhanAudio = null;
+    return true;
+  }
+
   function openLights() {
     sheet = 'lights';
     st.zone = Z.SETTINGS;
@@ -1172,6 +1397,8 @@
   }
 
   /** The TV powering off: the lights it set (movie mode, ambient) go off with it; the ones you turned on stay. */
+  setTimeout(maybeBrief, 8000);   // after the first data is in
+
   if (CONFIG.tapo && CONFIG.tapo.offWithTv) {
     TV.onPowerOff(function () {
       var mine = movie ? lights : ambient ? ambientLights() : [];
@@ -1204,6 +1431,7 @@
     var text = masjid ? trf('{prayer} at {mosque}', {prayer: p.name, mosque: masjid}) : trf('Time for {prayer}', {prayer: p.name});
     if (p.iqamah) text += '  ·  ' + trf('Jamaat {time}', {time: Data.time(p.iqamah)});
     if (document.hidden) TV.notify(text); else toast(text);
+    playAdhan(p.key);
     if (movie) return;
     ambientLights().forEach(function (l) {
       if (!l.on || !l.ok) return;
@@ -1299,10 +1527,11 @@
     var box = $('settings').firstChild;
     box.innerHTML = '';
     var title = el('div', 'title', box);
-    sym(sheet === 'lights' ? 'sunny' : 'settings', title);
-    title.appendChild(document.createTextNode(sheet === 'lights' ? tr('Lights') : tr('Home Settings')));
+    sym(sheet === 'lights' ? 'sunny' : sheet === 'list' ? 'check' : 'settings', title);
+    title.appendChild(document.createTextNode(sheet === 'lights' ? tr('Lights') : sheet === 'list' ? tr('Shopping list') : tr('Home Settings')));
     var list = el('div', 'list', box), holder = el('div', 'rows', list);
-    rowsNow = sheet === 'lights' ? lightRows() : settingRows();
+    rowsNow = sheet === 'lights' ? lightRows() : sheet === 'list' ? listRows() : settingRows();
+    if (st.row >= rowsNow.length) st.row = Math.max(0, rowsNow.length - 1);
     list.style.height = Math.min(rowsNow.length, 7) * 78 + 'px';
     for (var i = 0; i < rowsNow.length; i++) {
       var r = rowsNow[i], row = el('div', 'row' + (r.dim ? ' dim' : ''), holder, r.label);
@@ -1315,7 +1544,8 @@
       }
       hover(row, Z.SETTINGS, i);
     }
-    el('div', 'hint', box, sheet === 'lights' ? tr('OK turns a light on or off; the arrows change its brightness.') : tr('OK or the arrows change the value.'));
+    el('div', 'hint', box, sheet === 'lights' ? tr('OK turns a light on or off; the arrows change its brightness.')
+      : sheet === 'list' ? tr('OK ticks an item off.') : tr('OK or the arrows change the value.'));
     updateFocus();
   }
 
@@ -2074,7 +2304,14 @@
   var night = null;
 
   function movieNight() {
-    var films = Data.showcase().filter(function (p) { return p.kind === 'movie' && p.backdrop && Data.usable(p.app); });
+    // Not documentaries, animation, family or TV films, nor ones you've seen; the rest when that leaves none.
+    var seen = Prefs.seen(), skip = [99, 16, 10751, 10770];
+    var all = Data.showcase().filter(function (p) { return p.kind === 'movie' && p.backdrop && Data.usable(p.app); });
+    var films = all.filter(function (p) {
+      for (var g = 0; g < (p.genres || []).length; g++) if (skip.indexOf(p.genres[g]) >= 0) return false;
+      return seen.indexOf('movie:' + p.id) < 0;
+    });
+    if (!films.length) films = all.filter(function (p) { return seen.indexOf('movie:' + p.id) < 0; });
     if (!films.length) { toast(tr('No films to pick from right now.')); return; }
     for (var i = films.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1)), t = films[i];
@@ -2084,6 +2321,12 @@
     night = films;
     saverIndex = 0;
     showSaver();
+  }
+
+  function markSeen(p) {
+    var seen = Prefs.seen().slice(), key = 'movie:' + p.id;
+    if (seen.indexOf(key) < 0) seen.push(key);
+    Prefs.set('seen', seen.slice(-300));
   }
 
   var saverUrl = '', saverNext = null;
@@ -2131,11 +2374,12 @@
         back.style.backgroundRepeat = p.own ? 'no-repeat' : '';
         back.style.backgroundPosition = p.own ? 'center' : '';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
-        clock.children[2].textContent = p.pet ? '🐾 ' + p.pet : p.memory ? memoryText(p.memory) : p.own ? '' : p.title;
+        clock.children[2].textContent = p.pet ? '🐾 ' + p.pet : p.memory ? memoryText(p.memory) : p.own ? ''
+          : night ? p.title + (p.rating ? '  ·  ★ ' + p.rating.toFixed(1) : '') + (p.meta ? '  ·  ' + p.meta : '') : p.title;
         saverPick = p.own ? null : p;   // your own photo: OK only closes, like any other key
         // With Watch from the screensaver on, OK opens this title's app (any other key only closes).
         var app = !p.own && (night || Prefs.saverWatch()) && Data.appFor(p.app);
-        hint.textContent = night && app ? trf('Movie night · OK to watch on {app} · the arrows pick another', {app: app.title})
+        hint.textContent = night && app ? trf('Movie night · OK to watch on {app} · the arrows pick another', {app: app.title}) + '  ·  ' + tr('Down: seen it')
           : app ? trf('Press OK to watch on {app} · any other button to close', {app: app.title}) : '';
         setTimeout(function () {
           setClass(back, 'on', true);
@@ -2185,12 +2429,14 @@
     var ok = k === TV.keys.ok, picking = night;
     if (picking && k === undefined) return true;   // the pointer moving doesn't end movie night
     if (picking && (k === TV.keys.left || k === TV.keys.right || k === TV.keys.up || k === TV.keys.down)) {
+      if (k === TV.keys.down && saverPick) markSeen(saverPick);
       if (saverNext) saverNext();
       return true;
     }
     var app = ok && saverPick && (picking || Prefs.saverWatch()) && Data.appFor(saverPick.app);
     hideSaver();
     if (app) {
+      if (picking) markSeen(saverPick);
       if (picking && lights.length && !movie) toggleMovie();
       launcher(app.id, app.title)();
     }
@@ -2201,6 +2447,7 @@
 
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
+    if (cancelGoodnight() || closeBriefing() || (k === TV.keys.back && stopAdhan())) { idleAt = Date.now(); e.preventDefault(); return; }
     if (poke(k)) { e.preventDefault(); return; }   // the first press only wakes the screen (or OK watches)
     if (typing(k)) return;
     if (k === TV.keys.left) move(-1, 0);
@@ -2301,8 +2548,9 @@
   document.addEventListener('webOSRelaunch', reopened);   // LG: opened again while running
   window.addEventListener('appcontrol', reopened);        // Samsung: the same
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) { hideSaver(); return; }
+    if (document.hidden) { hideSaver(); stopAdhan(); return; }
     idleAt = Date.now();
+    setTimeout(maybeBrief, 5000);
     loadApps(function () { renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
   });
 
@@ -2326,6 +2574,7 @@
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();
+    maybeBrief();
     if (!saverOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) showSaver();
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
   }, 30000);

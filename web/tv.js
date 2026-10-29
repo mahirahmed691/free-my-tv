@@ -66,9 +66,13 @@ var TV = (function () {
   // makes the call.
   var SSAP_KEY = 'fmtv.ssapKey', SSAP_REFUSED = 'fmtv.ssapRefused';
 
-  /** One call to the remote control API; done(result) with null on failure. */
-  function ssap(uri, done) {
+  /**
+   * One call to the remote control API; done(result) with null on failure. power: Goodnight's turnOff, with its own
+   * permission and key, so a "no" there leaves the app list alone.
+   */
+  function ssap(uri, done, power) {
     var ws = null, finished = false, key = null;
+    var keyName = power ? SSAP_KEY + '.power' : SSAP_KEY, refusedName = power ? SSAP_REFUSED + '.power' : SSAP_REFUSED;
     var timer = setTimeout(function () { finish(null); }, 90000);   // time to answer the TV's prompt
     function finish(result) {
       if (finished) return;
@@ -77,11 +81,11 @@ var TV = (function () {
       try { ws.close(); } catch (e) {}
       done(result);
     }
-    try { key = localStorage.getItem(SSAP_KEY); } catch (e) {}
+    try { key = localStorage.getItem(keyName); } catch (e) {}
     try { ws = new WebSocket('ws://127.0.0.1:3000'); } catch (e) { finish(null); return; }
     ws.onopen = function () {
       var payload = {forcePairing: false, pairingType: 'PROMPT',
-        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: ['READ_INSTALLED_APPS']}};
+        manifest: {manifestVersion: 1, appVersion: '1.0', permissions: [power ? 'CONTROL_POWER' : 'READ_INSTALLED_APPS']}};
       if (key) payload['client-key'] = key;
       ws.send(JSON.stringify({type: 'register', id: 'register', payload: payload}));
     };
@@ -90,11 +94,11 @@ var TV = (function () {
       try { m = JSON.parse(event.data); } catch (e) {}
       if (!m) return;
       if (m.type === 'registered') {
-        try { localStorage.setItem(SSAP_KEY, m.payload['client-key']); } catch (e) {}
+        try { localStorage.setItem(keyName, m.payload['client-key']); } catch (e) {}
         ws.send(JSON.stringify({type: 'request', id: 'call', uri: 'ssap://' + uri}));
       } else if (m.id === 'call' || m.type === 'error') {
         if (m.id === 'register' && m.type === 'error') {
-          try { localStorage.setItem(SSAP_REFUSED, '1'); } catch (e) {}   // the person said no on the TV
+          try { localStorage.setItem(refusedName, '1'); } catch (e) {}   // the person said no on the TV
         }
         finish(m.type !== 'error' && m.payload && m.payload.returnValue !== false ? m.payload : null);
       }
@@ -108,10 +112,10 @@ var TV = (function () {
       timer = setTimeout(function () { finish(null); }, 100000);   // the service waits 90 s for the prompt
       luna('luna://' + self + '.service/ssap', {uri: uri, clientKey: key}, function (res) {
         if (res && res.clientKey) {
-          try { localStorage.setItem(SSAP_KEY, res.clientKey); } catch (e) {}
+          try { localStorage.setItem(keyName, res.clientKey); } catch (e) {}
         }
         if (res && res.refused) {
-          try { localStorage.setItem(SSAP_REFUSED, '1'); } catch (e) {}   // the person said no on the TV
+          try { localStorage.setItem(refusedName, '1'); } catch (e) {}   // the person said no on the TV
         }
         finish(res && res.payload && res.payload.returnValue !== false ? res.payload : null);
       });
@@ -458,6 +462,12 @@ var TV = (function () {
         if (going && !off) { off = true; done(); } else if (!going && m.state === 'Active') off = false;
       };
       bridge.call('luna://com.webos.service.tvpower/power/getPowerState', JSON.stringify({subscribe: true}));
+    },
+
+    /** Turns the TV off (Goodnight), through its remote control API: it asks once to allow it. done(ok). */
+    powerOff: function (done) {
+      if (!webos) { done(false); return; }
+      ssap('system/turnOff', function (res) { done(!!res); }, true);
     },
 
     /** A message from the TV itself, over whatever app is in front (LG's toast); false where there's none. */
