@@ -869,6 +869,13 @@
 
   // MARK: - Home Settings
 
+  var FONTS = ['inter', 'manrope', 'outfit', 'jakarta', 'lexend', 'lora'];
+  var FONT_NAMES = {inter: 'Inter', manrope: 'Manrope', outfit: 'Outfit', jakarta: 'Plus Jakarta Sans', lexend: 'Lexend', lora: 'Lora'};
+
+  function applyFont() {
+    for (var i = 0; i < FONTS.length; i++) setClass(body, 'font-' + FONTS[i], FONTS[i] === Prefs.font() && i > 0);
+  }
+
   function settingRows() {
     var unit = Prefs.temperature(), theme = Prefs.theme();
     var auto = tr('Automatic'), picked = pickedLanguage();
@@ -879,6 +886,8 @@
         step: function (d) { cycle('temperature', ['auto', 'C', 'F'], unit, d); renderPanels(); }},
       {label: tr('Theme'), value: theme === 'light' ? tr('Light') : theme === 'dark' ? tr('Dark') : auto,
         step: function (d) { cycle('theme', ['auto', 'light', 'dark'], theme, d); checkNight(); }},
+      {label: tr('Font'), value: FONT_NAMES[Prefs.font()] || 'Inter',
+        step: function (d) { cycle('font', FONTS, Prefs.font(), d); applyFont(); }},
       {label: tr('Picks per tab'), value: String(Prefs.cards()),
         step: function (d) { Prefs.set('cards', 3 + (Prefs.cards() - 3 + (d || 1) + 4) % 4); renderCards(); }},
       {label: tr('Watch from the screensaver'), toggle: Prefs.saverWatch(),
@@ -1849,6 +1858,7 @@
   // LG's screensaver waits only when ours will show: not under a sheet (ours waits there), and not without photos.
   TV.holdScreenSaver(function () { return !sheetOpen() && saverPhotos().length > 0; });
   fit();
+  applyFont();
   renderTop();
   tickClock();
   loadApps(function () {

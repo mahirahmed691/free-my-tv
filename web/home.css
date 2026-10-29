@@ -10,6 +10,32 @@
   src: url('fonts/InterVariable.ttf') format('truetype');
   font-weight: 100 900;
 }
+/* The other fonts Home Settings offers (web/fonts, each under its OFL): a browser loads only the one in use. */
+@font-face {
+  font-family: 'Manrope';
+  src: url('fonts/Manrope.ttf') format('truetype');
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: 'Outfit';
+  src: url('fonts/Outfit.ttf') format('truetype');
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('fonts/PlusJakartaSans.ttf') format('truetype');
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: 'Lexend';
+  src: url('fonts/Lexend.ttf') format('truetype');
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: 'Lora';
+  src: url('fonts/Lora.ttf') format('truetype');
+  font-weight: 100 900;
+}
 
 html, body {
   margin: 0;
@@ -26,6 +52,12 @@ body {
   -webkit-font-smoothing: antialiased;
   cursor: default;
 }
+
+body.font-manrope { font-family: 'Manrope', 'Inter', 'LG Smart UI', 'Helvetica Neue', Arial, sans-serif; }
+body.font-outfit { font-family: 'Outfit', 'Inter', 'LG Smart UI', 'Helvetica Neue', Arial, sans-serif; }
+body.font-jakarta { font-family: 'Plus Jakarta Sans', 'Inter', 'LG Smart UI', 'Helvetica Neue', Arial, sans-serif; }
+body.font-lexend { font-family: 'Lexend', 'Inter', 'LG Smart UI', 'Helvetica Neue', Arial, sans-serif; }
+body.font-lora { font-family: 'Lora', 'Inter', 'LG Smart UI', 'Helvetica Neue', Arial, sans-serif; }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; outline: none; }
 

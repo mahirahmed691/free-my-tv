@@ -61,6 +61,8 @@ def read_config(path):
         'currency': values.get('currency', 'USD') or 'USD',
         'temperature': values.get('temperature', 'auto') or 'auto',
         'theme': values.get('theme', 'auto') or 'auto',
+        # The home screen's font (Home Settings can change it on the TV): inter, manrope, outfit, jakarta, lexend or lora.
+        'font': values.get('font', 'inter') or 'inter',
         'showCrypto': values.get('show_crypto', 'true').lower() != 'false',
         'hideAnimation': values.get('hide_animation', 'false').lower() == 'true',
         'hideApps': [s.strip() for s in values.get('hide_apps', '').split(',') if s.strip()],
@@ -137,6 +139,11 @@ def files(config, made_by):
     for name in ('InterVariable.ttf', 'OFL.txt'):
         with open(os.path.join(ROOT, 'app', 'assets', 'fonts', name), 'rb') as f:
             out['fonts/' + name] = f.read()
+    fonts = os.path.join(web, 'fonts')
+    for name in sorted(os.listdir(fonts)):
+        if name.endswith('.ttf') or name.startswith('OFL-'):
+            with open(os.path.join(fonts, name), 'rb') as f:
+                out['fonts/' + name] = f.read()
     return out
 
 

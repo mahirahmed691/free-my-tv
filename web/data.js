@@ -46,6 +46,8 @@ var Prefs = (function () {
     language: function () { return pick('language', CONFIG.language || 'auto'); },
     temperature: function () { return pick('temperature', CONFIG.temperature || 'auto'); },
     theme: function () { return pick('theme', CONFIG.theme || 'auto'); },
+    /** The home screen's font: inter, manrope, outfit, jakarta, lexend or lora. */
+    font: function () { return pick('font', CONFIG.font || 'inter'); },
     weather: function () { return pick('weather', true); },
     /** OK on the screensaver opens the title it shows, in its app; any other key only closes it (off by default). */
     saverWatch: function () { return pick('saverWatch', false) === true; },
