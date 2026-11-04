@@ -110,6 +110,9 @@ def read_config(path):
                   'married': values.get('married', ''),
                   # Maghrib's warm light: the Tapo lights that are on turn warm and soft at Maghrib (the TV has to be on).
                   'prayerLights': values.get('prayer_lights', 'false').lower() == 'true',
+                  # Tomorrow's Sunnah fast, from midday, and Surah Al-Kahf on the Islamic Friday, as chips.
+                  'sunnahFasts': values.get('sunnah_fasts', 'false').lower() == 'true',
+                  'fridayKahf': values.get('friday_kahf', 'false').lower() == 'true',
                   # Ramadan and the Eids on the home screen, and a gold glow in the sky at Maghrib.
                   'festive': values.get('ramadan_theme', 'false').lower() == 'true',
                   # At each adhan: a banner (the TV's toast over other apps) and the lights that are on dip.

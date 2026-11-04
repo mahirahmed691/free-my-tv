@@ -597,6 +597,9 @@
         });
       }
     }
+    var fast = fastLine(Date.now());
+    if (fast) chip(q, 'prayer', tr('Sunnah fast'), fast);
+    if (kahfDue(Date.now())) chip(q, 'prayer', tr('Sunnah'), tr('Surah Al-Kahf'));
     if (movie) chip(q, 'lights', tr('Lights'), tr('Movie mode'));   // early: the one you'd want to see
     var foot = footballLine();
     if (foot && foot[2]) chip(q, foot[1] === 'late' ? 'live' : 'match', foot[1] === 'late' ? tr('Live') : tr('Match'), foot[0]);
@@ -645,6 +648,36 @@
     if (foot && !foot[2]) chip(q, 'match', tr('Match'), foot[0]);
     // Whole chips only: drop from the end while the row is wider than its room.
     while (q.lastChild && q.scrollWidth > q.clientWidth + 1) q.removeChild(q.lastChild);
+  }
+
+  /** The Sunnah fast on `day`, or '': never in Ramadan, nor on the days it's forbidden (the Eids and the days of Tashriq). */
+  function sunnahFast(day) {
+    var h = Islam.hijri(day), w = day.getDay();
+    if (h.month === 9 || (h.month === 10 && h.day === 1) || (h.month === 12 && h.day >= 10 && h.day <= 13)) return '';
+    if (h.month === 12 && h.day === 9) return tr('Arafah');
+    if (h.month === 1 && (h.day === 9 || h.day === 10)) return tr('Ashura');
+    if (h.day >= 13 && h.day <= 15) return tr('White Days');
+    return w === 1 || w === 4 ? formatDate('format|EEEE', day.getTime()) : '';
+  }
+
+  /** For planning suhoor: tomorrow's fast from midday, until that day's Fajr; not all day, or it'd show four days in seven. */
+  function fastLine(now) {
+    if (!(CONFIG.islam && CONFIG.islam.sunnahFasts) || !Islam.on()) return '';
+    var d = new Date(now), fajr = Islam.at('fajr', d, +Prefs.latitude(), +Prefs.longitude()), name;
+    if (fajr && now < fajr) {
+      name = sunnahFast(d);
+      return name ? trf('{show} today', {show: name}) : '';
+    }
+    if (d.getHours() < 12) return '';
+    name = sunnahFast(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
+    return name ? trf('{show} tomorrow', {show: name}) : '';
+  }
+
+  /** The Islamic Friday: from Maghrib on Thursday to Maghrib on Friday. */
+  function kahfDue(now) {
+    if (!(CONFIG.islam && CONFIG.islam.fridayKahf) || !Islam.on()) return false;
+    var d = new Date(now), w = d.getDay(), at = Islam.at('maghrib', d, +Prefs.latitude(), +Prefs.longitude());
+    return !!at && ((w === 4 && now >= at) || (w === 5 && now < at));
   }
 
   function renderQuotes() {
@@ -1393,6 +1426,15 @@
 
   var briefingTimer = 0;
 
+  /** Up to three trains, the troubled ones first (one may be well down the board), and National Rail's first message. */
+  function trainBoard(t) {
+    function late(s) { return s.cancelled || (s.etd && s.etd !== 'On time'); }
+    var bad = t.services.filter(late), list = (bad.length ? bad : t.services).slice(0, 3);
+    return [list.map(function (s) {
+      return s.destination + ' ' + s.std + (s.cancelled ? ' ' + tr('Cancelled') : late(s) ? ' ' + s.etd : '');
+    }).join('  ·  '), (t.messages && t.messages[0]) || ''];
+  }
+
   function maybeBrief() {
     var d = new Date(), h = d.getHours();
     if (!CONFIG.briefing || h < 5 || h >= 12 || Prefs.briefed() === d.toDateString()) return;
@@ -1424,9 +1466,9 @@
     }
     var t = Data.trains;
     if (t && t.services && t.services.length) {
-      var tr2 = [];
-      for (var k = 0; k < t.services.length && k < 3; k++) tr2.push(t.services[k].destination + ' ' + t.services[k].std + (t.services[k].cancelled ? ' ' + tr('Cancelled') : ''));
-      line(tr('Trains'), tr2.join('  ·  '));
+      var board = trainBoard(t);
+      line(tr('Trains'), board[0]);
+      if (board[1]) line(tr('Trains'), board[1]);
     }
     var cats = fedLine();
     if (cats) line(cats[0], cats[1]);
