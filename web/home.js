@@ -55,6 +55,7 @@
 
   var stage = $('stage'), body = document.body;
   if (CONFIG.cinematic) body.className += ' cine';
+  if (CONFIG.livingSky) { body.className += ' sky-live'; Sky.init($('sky')); }
 
   /**
    * The 1920 × 1080 stage fills the window (on the TV it already is 1920 × 1080). A TV's window only gets shorter for
@@ -2397,9 +2398,16 @@
 
   var lastNight = null;
 
+  function paintSky(night) {
+    if (!CONFIG.livingSky) return;
+    var w = Data.weather;
+    Sky.paint(Date.now(), +Prefs.latitude(), +Prefs.longitude(), night, w ? w.code : 0);
+  }
+
   function checkNight() {
     var night = Data.isNight(Date.now());
     setClass(body, 'night', night);
+    paintSky(night);
     if (night === lastNight) return;
     lastNight = night;
     document.documentElement.style.background = night ? '#0B0B0D' : '';

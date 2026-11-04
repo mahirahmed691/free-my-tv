@@ -830,3 +830,26 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 @keyframes pet-sway { from { transform: rotate(-1.2deg); } to { transform: rotate(1.2deg); } }
 #visitor.in img { -webkit-animation: pet-sway 2.6s ease-in-out infinite alternate; animation: pet-sway 2.6s ease-in-out infinite alternate; }
 .lite #visitor img { -webkit-filter: none; filter: none; -webkit-animation: none !important; animation: none !important; }
+
+/* The living sky (web/sky.js): over the film's photo, which still shows through, and under everything else. */
+.sky-live #sky .veil { background: rgba(245, 245, 247, 0.2); }
+.night.sky-live #sky .veil { background: rgba(11, 11, 13, 0.3); }
+#sky .live, #sky .stars, #sky .fall { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
+#sky .stars { opacity: 0; -webkit-transition: opacity 3s; transition: opacity 3s; }
+#sky .stars canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 760px; opacity: 1; -webkit-animation: twinkle 7s ease-in-out infinite alternate; animation: twinkle 7s ease-in-out infinite alternate; }
+#sky .stars canvas + canvas { -webkit-animation-delay: -3.5s; animation-delay: -3.5s; -webkit-animation-duration: 9s; animation-duration: 9s; }
+@-webkit-keyframes twinkle { from { opacity: 0.45; } to { opacity: 1; } }
+@keyframes twinkle { from { opacity: 0.45; } to { opacity: 1; } }
+#sky .falling { position: absolute; left: 0; top: -960px; width: 100%; height: 2040px; background-repeat: repeat; }
+@-webkit-keyframes sky-fall { from { -webkit-transform: translateY(0); } to { -webkit-transform: translateY(960px); } }
+@keyframes sky-fall { from { transform: translateY(0); } to { transform: translateY(960px); } }
+#sky .rain .falling { opacity: 0.34; -webkit-animation: sky-fall 1.1s linear infinite; animation: sky-fall 1.1s linear infinite; }
+#sky .rain .falling + .falling { background-position: 310px 0; opacity: 0.2; -webkit-animation-duration: 1.6s; animation-duration: 1.6s; }
+#sky .snow .falling { opacity: 0.55; -webkit-animation: sky-fall 22s linear infinite; animation: sky-fall 22s linear infinite; }
+#sky .snow .falling + .falling { background-position: 310px 0; opacity: 0.32; -webkit-animation-duration: 34s; animation-duration: 34s; }
+.covered #sky .stars canvas, .covered #sky .falling { -webkit-animation-play-state: paused; animation-play-state: paused; }
+/* Over a coloured sky the theme's greys are too faint. */
+.sky-live:not(.night) .tab:not(.on):not(.focus) { color: rgba(29, 29, 31, 0.74); }
+.sky-live:not(.night) .card .meta { color: #2C2C2E; }
+.lite #sky .fall, .flat #sky .fall { display: none; }
+.lite #sky .stars canvas, .flat #sky .stars canvas { -webkit-animation: none !important; animation: none !important; }
