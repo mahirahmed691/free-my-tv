@@ -794,6 +794,18 @@ var Data = (function () {
     return best;
   }
 
+  /** The title's logo: in the TV's language, else English, else with no language; the best voted. */
+  function bestLogo(images) {
+    var logos = (images && images.logos) || [], best = '', score = -1;
+    for (var i = 0; i < logos.length; i++) {
+      var l = logos[i];
+      if (!/\.png$/.test(l.file_path || '')) continue;   // TMDB also has SVGs, which old TVs draw badly
+      var s = (l.iso_639_1 === I18N.base ? 20 : l.iso_639_1 === 'en' ? 10 : 0) + (l.vote_average || 0);
+      if (s > score) { score = s; best = l.file_path; }
+    }
+    return best;
+  }
+
   /** Genre, runtime or seasons, and the service it's on among the TV's apps. */
   function details(p, done) {
     tmdb('/' + p.kind + '/' + p.id + '?language=' + lang() + '&append_to_response=watch/providers,images&include_image_language=null,'
@@ -801,6 +813,7 @@ var Data = (function () {
       if (err) { done(err); return; }
       var best = bestBackdrop(o.images);
       if (best) p.backdrop = best;
+      p.logo = bestLogo(o.images);
       if (o.poster_path) p.poster = o.poster_path;
       var parts = [];
       if (p.kind === 'tv') parts.push(tr('Series'));

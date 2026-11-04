@@ -54,6 +54,7 @@
   }
 
   var stage = $('stage'), body = document.body;
+  if (CONFIG.cinematic) body.className += ' cine';
 
   /**
    * The 1920 × 1080 stage fills the window (on the TV it already is 1920 × 1080). A TV's window only gets shorter for
@@ -671,7 +672,7 @@
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
     if (!Data.hasKey() && st.zone === Z.TOP && st.top < 3) st.top = 3;
     var same = list.length === cards.length;
-    for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta;
+    for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta && list[i].logo === cards[i].logo;
     if (same && holder.children.length === list.length) return;
     cards = list;
     holder.innerHTML = '';
@@ -682,6 +683,7 @@
       var poster = el('div', 'layer', img);
       poster.style.backgroundImage = 'url(' + (p.poster ? Data.image(p.poster, 'w342') : Data.image(p.backdrop, 'w780')) + ')';
       el('div', 'layer back', img);
+      if (CONFIG.cinematic) { el('div', 'layer shade', img); el('div', 'logo', img); }
       el('div', 'name', card, p.title);
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
@@ -708,11 +710,61 @@
       if (wide && !n.getAttribute('data-back') && cards[i]) {
         n.setAttribute('data-back', '1');
         n.querySelector('.back').style.backgroundImage = 'url(' + Data.image(cards[i].backdrop, 'w1280') + ')';
+        if (CONFIG.cinematic && cards[i].logo) cardLogo(n, Data.image(cards[i].logo, 'w500'));
       }
+      if (wide) cardGlow(at);
       left += w + 40;
     }
     holder.style.webkitTransform = holder.style.transform = 'translateX(' + (-scroll) + 'px)';
   }
+
+  /** The title's logo on the wide card, in place of its name below; the name stays if the logo never loads. */
+  function cardLogo(card, url) {
+    var img = new Image();
+    img.onload = function () {
+      card.querySelector('.logo').style.backgroundImage = 'url(' + url + ')';
+      setClass(card, 'has-logo', true);
+    };
+    img.src = url;
+  }
+
+  var glowFor = '', glowTimer = 0;
+
+  /** The focused card's glow, in its picture's colours, behind the whole row so it doesn't tint the cards beside it. */
+  function cardGlow(at) {
+    var g = $('glow'), p = cards[st.card];
+    if (!CONFIG.cinematic || st.zone !== Z.CARDS || !p || !p.backdrop) { setClass(g, 'on', false); return; }
+    g.style.webkitTransform = g.style.transform = 'translateX(' + (at - 240) + 'px)';
+    var url = Data.image(p.backdrop, 'w185');
+    if (url === glowFor) { setClass(g, 'on', !!g.style.backgroundImage); return; }
+    glowFor = url;
+    setClass(g, 'on', false);
+    clearTimeout(glowTimer);
+    glowTimer = setTimeout(function () {
+      pictureColours(url, function (c) {
+        if (glowFor !== url) return;
+        g.style.backgroundImage = c ? glowPaint(c) : '';
+        setClass(g, 'on', !!c && st.zone === Z.CARDS);
+      });
+    }, 220);   // the old glow fades first, and a quick run along the row asks for only the last picture
+  }
+
+  function glowPaint(c) {
+    // Each fades out inside the box, or its edge would show as a straight line.
+    return 'radial-gradient(ellipse 33% 49% at 34% 50%, ' + glowColour(c[0]) + ', rgba(0, 0, 0, 0)),'
+      + 'radial-gradient(ellipse 33% 49% at 66% 50%, ' + glowColour(c[1]) + ', rgba(0, 0, 0, 0))';
+  }
+
+  /** Vivid enough to read as a colour; a grey picture stays a soft white. */
+  function glowColour(c) {
+    var s = c.s < 0.12 ? 0 : Math.min(1, c.s * 1.25), v = Math.max(0.7, c.v), h = c.h / 60;
+    var x = v * (1 - s * Math.abs(h % 2 - 1)), m = v * (1 - s), seg = Math.floor(h) % 6;
+    var rgb = [[v, x, m], [x, v, m], [m, v, x], [m, x, v], [x, m, v], [v, m, x]][seg];
+    return 'rgba(' + rgb.map(function (n) { return Math.round(n * 255); }).join(', ') + ', 0.72)';
+  }
+
+  /** What's covered needn't move: the drift stops under the screensavers. */
+  function coverHome() { setClass(body, 'covered', saverOn || ambientOn); }
 
   var bgUrl = null, bgFront = 'bgA';
 
@@ -2444,6 +2496,7 @@
   function showSaver() {
     var photos = night || saverPhotos();
     saverOn = true;
+    coverHome();
     saverPick = null;
     var s = $('saver');
     s.innerHTML = '';
@@ -2528,6 +2581,7 @@
 
   function hideSaver() {
     saverOn = false;
+    coverHome();
     night = null;
     clearTimeout(saverTimer);
     setClass($('saver'), 'on', false);
@@ -2548,6 +2602,7 @@
     el('div', 'temp', side);
     el('div', 'cond', side);
     ambientOn = true;
+    coverHome();
     setClass(a, 'on', true);
     ambientTimer = setInterval(tickAmbient, 30000);
     tickAmbient();
@@ -2569,6 +2624,7 @@
 
   function hideAmbient() {
     ambientOn = false;
+    coverHome();
     clearInterval(ambientTimer);
     setClass($('ambient'), 'on', false);
   }

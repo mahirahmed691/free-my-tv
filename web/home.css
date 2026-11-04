@@ -772,3 +772,26 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .flat .cell.focus .face { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.4) !important; }
 .flat #home, .flat #drawer, .flat #cards, .flat .card, .flat #tiles, .flat .tile { will-change: transform; }
 .flat #top { will-change: opacity; }
+
+/* Cinematic (CONFIG.cinematic): only transform and opacity move, and low-memory TVs keep the plain look. */
+#glow { position: absolute; left: 0; top: 42px; width: 1520px; height: 882px; opacity: 0; pointer-events: none;
+  -webkit-transition: opacity 0.45s, -webkit-transform 0.22s; transition: opacity 0.45s, transform 0.22s; }
+#glow.on { opacity: 1; }
+.card .shade { opacity: 0; -webkit-transition: opacity 0.3s; transition: opacity 0.3s;
+  background: -webkit-linear-gradient(left, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0) 58%); background: linear-gradient(90deg, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0) 58%); }
+.card .logo { position: absolute; left: 44px; bottom: 36px; width: 440px; height: 156px; opacity: 0;
+  background: no-repeat left bottom; background-size: contain; -webkit-transition: opacity 0.3s; transition: opacity 0.3s; }
+.card.wide.has-logo .shade, .card.wide.has-logo .logo { opacity: 1; }
+.card.wide.has-logo .name { visibility: hidden; }
+.card.wide.has-logo .meta { top: 464px; font-size: 27px; }
+
+@-webkit-keyframes card-drift { from { -webkit-transform: scale(1); } to { -webkit-transform: scale(1.08) translateX(-1.5%); } }
+@keyframes card-drift { from { transform: scale(1); } to { transform: scale(1.08) translateX(-1.5%); } }
+@-webkit-keyframes sky-drift { from { -webkit-transform: translate(-1.5%, -1%) scale(1); } to { -webkit-transform: translate(1.5%, 1%) scale(1.04); } }
+@keyframes sky-drift { from { transform: translate(-1.5%, -1%) scale(1); } to { transform: translate(1.5%, 1%) scale(1.04); } }
+.cine .card.wide .back { -webkit-animation: card-drift 26s ease-in-out infinite alternate; animation: card-drift 26s ease-in-out infinite alternate; }
+.cine #sky canvas { -webkit-animation: sky-drift 48s ease-in-out infinite alternate; animation: sky-drift 48s ease-in-out infinite alternate; }
+.night.cine #sky .veil { background: rgba(11, 11, 13, 0.62); }
+.cine.covered #sky canvas, .cine.covered .card .back { -webkit-animation-play-state: paused; animation-play-state: paused; }
+.lite #glow, .flat #glow { display: none; }
+.lite .card .back, .lite #sky canvas, .flat .card .back, .flat #sky canvas { -webkit-animation: none !important; animation: none !important; }

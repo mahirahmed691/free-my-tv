@@ -82,6 +82,8 @@ def read_config(path):
                    # Film match: the phones vote on the films this TV can play (make match-links).
                    'match': values.get('film_match', 'false').lower() == 'true',
                    'warnings': values.get('weather_warnings', 'false').lower() == 'true'},
+        # The film's logo on its card, a glow in its colours and a slow drift in the pictures (off on low-memory TVs).
+        'cinematic': values.get('cinematic', 'false').lower() == 'true',
         # The morning briefing: the first time the home screen shows each morning, one card with the day.
         'briefing': values.get('briefing', 'false').lower() == 'true',
         # Shows you follow: "New episode today" from TMDB (comma separated names).
