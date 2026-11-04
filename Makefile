@@ -10,6 +10,7 @@
 #   make note-clear             remove it
 #   make revoke-phone [NAME=]   that phone's Shortcuts stop working (yours without NAME, NAME=Mariam hers)
 #   make new-phone-key [NAME=]  a fresh key for a phone (NAME=Mariam: hers), its Shortcuts (note, shopping list) in out/shortcuts
+#   make match-links [NAMES=]   fresh Film match links, one per person, in out/match-links (old links stop working)
 #   make type TEXT="..."        types into the text field open on the TV (ENTER=1 presses Enter after)
 # Settings are in tv.properties (tracked); the keys stay in config.properties (gitignored).
 # Roll back: git checkout tv-YYYY-MM-DD-N && make install (code and settings both come back; the keys are today's).
@@ -17,7 +18,7 @@
 TV ?= 192.168.0.4
 PYTHON ?= python3
 
-.PHONY: build install uninstall release rollback config-hash note note-clear revoke-phone new-phone-key type tapo-login tapo-list
+.PHONY: build install uninstall release rollback config-hash note note-clear revoke-phone new-phone-key match-links type tapo-login tapo-list
 
 build:
 	BUILD_TAG='$(BUILD_TAG)' DEVMODE_UNTIL='$(DEVMODE_UNTIL)' $(PYTHON) scripts/tvconfig.py merge >/dev/null
@@ -46,6 +47,9 @@ note-clear:
 
 revoke-phone:
 	@$(PYTHON) scripts/phone_key.py revoke $(NAME)
+
+match-links:
+	@$(PYTHON) scripts/match_links.py $(or $(NAMES),Mahir Mariam) $(if $(DRY),--dry-run)
 
 new-phone-key:
 	@$(PYTHON) scripts/phone_key.py new $(NAME)

@@ -1,4 +1,5 @@
 import { eventsBetween, dayBounds } from './ics.js';
+import { matchPage } from './match-page.js';
 
 /**
  * The TV's backend: holds the API keys (Wrangler secrets), calls the sources, and gives the TV small JSON. The TV
@@ -13,6 +14,9 @@ import { eventsBetween, dayBounds } from './ics.js';
  *   GET /v1/list        the shopping list (the TV, or a phone's ADMIN_TOKEN); POST {"add"} or {"done"} (comma or line
  *                       separated) or DELETE it with ADMIN_TOKEN (the phones' Shortcuts); the TV may only tick off
  *   GET /v1/fed         when the cats were last fed and by whom; POST (a phone's ADMIN_TOKEN) says they just were
+ *   GET /match          Film match's page for the phones (the key stays in the link's #fragment; only from ALLOWED_IPS)
+ *   GET /v1/match       the TV: what you both like; a phone (MATCH_KEYS): the films left to vote on, and the same
+ *                       POST {"films"} (the TV: what it can play) or {"id", "like"} (a phone); DELETE: a phone votes again
  *   GET /v1/warnings    the Met Office's weather warnings for WARNINGS_REGION (nw: North West England; 10 min cache)
  *   GET /v1/football    FOOTBALL_TEAM's live match, next fixture and last result (football-data.org, 5 min cache)
  *   GET /v1/calendar    today's events from CALENDAR_ICS (a calendar's secret iCal address; 10 min cache)
@@ -25,6 +29,7 @@ import { eventsBetween, dayBounds } from './ics.js';
  * Every 15 minutes (cron) it also checks WATCH_SITES ("Name=https://url|..."), and the GitHub card counts them with the
  * monitoring Workers' sites.
  *
+ * MATCH_KEYS ("Name=key,Name=key", make match-links) may only vote: its keys travel in links.
  * Secrets: TV_TOKEN, ADMIN_TOKEN (writes the note, one per device, comma separated, "Name=token" to sign it; never on the TV), UKHO_KEY, GITHUB_TOKEN (fine-grained, read-only),
  * FOOTBALL_KEY (football-data.org), SALAH_WIDGET (the mosque's widget address, with its token), CALENDAR_ICS (the calendar's secret iCal address: anyone with it reads the calendar). Vars: STATIONS ("0451:Mersey,0461:Dee"), ALLOWED_IPS (addresses or CIDR ranges, comma
  * separated; empty = any), GITHUB_RECENT (how many recently pushed repos, 6).
@@ -37,7 +42,7 @@ const KEEP = 3 * DAY;   // how long KV keeps a cached answer (to serve stale whe
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -502,6 +507,89 @@ async function fed(request, env) {
   return json(entry);
 }
 
+// MARK: Film match (the TV lists what it can play; each phone votes; a film you all like goes to Movie night)
+
+const DECK_MAX = 40, VOTES_KEEP = 400;
+const votesKey = (name) => 'match:votes:' + name.toLowerCase();
+
+/** The voters, from MATCH_KEYS' "Name=key" entries. */
+export function matchPeople(list) {
+  return String(list || '').split(',').map((x) => x.split('=')[0].trim()).filter((x, i, all) => x && all.indexOf(x) === i);
+}
+
+/** What the TV sent, down to what the page needs; the image is a TMDB path, so it can only load from TMDB. */
+export function cleanFilms(list) {
+  if (!Array.isArray(list)) return [];
+  const films = [], text = (x, max) => String(x || '').replace(/\s+/g, ' ').trim().slice(0, max);
+  for (const f of list.slice(0, DECK_MAX)) {
+    const id = f && f.id, title = f && text(f.title, 120);
+    if (!Number.isSafeInteger(id) || id <= 0 || !title || films.some((x) => x.id === id)) continue;
+    const rating = Number(f.rating);
+    films.push({ id, title, image: /^\/[A-Za-z0-9_-]+\.[a-z]{3,4}$/.test(f.image || '') ? f.image : '', meta: text(f.meta, 80),
+      rating: rating > 0 && rating <= 10 ? Math.round(rating * 10) / 10 : 0 });
+  }
+  return films;
+}
+
+/** The films everyone liked: needs two voters at least, and only what's still in the deck (what the TV can play). */
+export function bothLike(films, votes) {
+  if (votes.length < 2) return [];
+  return films.filter((f) => votes.every((v) => v.some((x) => x.id === f.id && x.like)));
+}
+
+async function filmMatch(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const me = noteSender(env.MATCH_KEYS, auth);
+  const tv = env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN);
+  if (!me && !tv) return json({ error: 'token' }, 401);
+  if (request.method === 'DELETE') {
+    if (!me) return json({ error: 'a phone votes' }, 401);
+    await env.CACHE.delete(votesKey(me));
+    return json({ ok: true });
+  }
+  let body = null;
+  if (request.method === 'POST') {
+    try { body = await request.json(); } catch { return json({ error: 'JSON body' }, 400); }
+  }
+  let deck = (await env.CACHE.get('match:deck', 'json')) || { films: [], at: 0 };
+  if (body && tv) {
+    if (!Array.isArray(body.films)) return json({ error: 'the TV sends films' }, 400);
+    const films = cleanFilms(body.films), ids = (x) => x.map((f) => f.id).sort((a, b) => a - b).join();
+    if (ids(films) === ids(deck.films)) return json({ ok: true, changed: false });   // KV's writes are limited
+    deck = { films, at: Date.now() };
+    await env.CACHE.put('match:deck', JSON.stringify(deck));
+    return json({ ok: true, changed: true });
+  }
+  const people = matchPeople(env.MATCH_KEYS);
+  const votes = await Promise.all(people.map(async (name) => (await env.CACHE.get(votesKey(name), 'json')) || []));
+  const mine = me ? votes[people.indexOf(me)] : [];
+  if (body) {
+    if (!deck.films.some((f) => f.id === body.id) || typeof body.like !== 'boolean') return json({ error: 'a film from the list, and like true or false' }, 400);
+    const next = mine.filter((x) => x.id !== body.id).concat({ id: body.id, like: body.like }).slice(-VOTES_KEEP);
+    await env.CACHE.put(votesKey(me), JSON.stringify(next));
+    votes[people.indexOf(me)] = next;
+  }
+  const matches = bothLike(deck.films, votes);
+  if (tv) return json({ matches });
+  const left = deck.films.filter((f) => !votes[people.indexOf(me)].some((x) => x.id === f.id));
+  return json({ me, matches, left, total: deck.films.length });
+}
+
+/** A nonce for each answer, so the page's script runs and nothing else could. */
+function filmMatchPage() {
+  const nonce = crypto.randomUUID();
+  return new Response(matchPage(nonce), {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src https://image.tmdb.org; `
+        + "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    },
+  });
+}
+
 // MARK: Weather warnings (the Met Office's RSS for a region)
 
 const WARNINGS_FRESH = 10 * 60000;
@@ -620,14 +708,16 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const writes = request.method === 'POST' || request.method === 'DELETE';
     const writesNote = path === '/v1/notes' && writes;
-    if (request.method !== 'GET' && !writesNote && !((path === '/v1/list' || path === '/v1/fed') && writes)) return json({ error: 'GET only' }, 405);
+    if (request.method !== 'GET' && !writesNote && !((path === '/v1/list' || path === '/v1/fed' || path === '/v1/match') && writes)) return json({ error: 'GET only' }, 405);
     if (!allowedIp(request, env)) return json({ error: 'not from an allowed address' }, 403);
     if (path === '/health') return json(await health(env));
+    if (path === '/match') return filmMatchPage();
     if (path === '/webos/apps.json' || path === '/webos/FreeMyTV.ipk') return homebrew(path, env);
 
     if (writesNote) return notes(request, env);
     if (path === '/v1/list') return shopping(request, env);
     if (path === '/v1/fed') return fed(request, env);
+    if (path === '/v1/match') return filmMatch(request, env);
     const auth = request.headers.get('Authorization') || '';
     if (!env.TV_TOKEN || !sameSecret(auth, 'Bearer ' + env.TV_TOKEN)) return json({ error: 'token' }, 401);
     try {

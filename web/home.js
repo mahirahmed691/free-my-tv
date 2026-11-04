@@ -614,6 +614,9 @@
     }
     var bin = binDay(Date.now());
     if (bin) chip(q, 'bins', tr('Bins'), bin.today ? trf('{bin} today', {bin: bin.bin}) : trf('{bin} out tonight', {bin: bin.bin}));
+    var both = Data.filmMatches.map(function (m) { return m.title; });
+    if (both.length) chip(q, 'love', tr('Film match'), both.length > 3
+      ? both.slice(0, 2).join('  ·  ') + '  ·  ' + trf('+{n} more', {n: both.length - 2}) : both.join('  ·  '));
     var list = Data.shopping;
     if (list.length) chip(q, 'list', tr('Shopping'), list.length > 4
       ? list.slice(0, 3).join('  ·  ') + '  ·  ' + trf('+{n} more', {n: list.length - 3}) : list.join('  ·  '));
@@ -2377,22 +2380,55 @@
    */
   var night = null;
 
-  function movieNight() {
+  function sameFilm(list, p) { return list.some(function (x) { return x.id === p.id; }); }
+
+  /** Films for tonight: what this TV can play that you haven't seen. */
+  function nightFilms() {
     // Not documentaries, animation, family or TV films, nor ones you've seen; the rest when that leaves none.
     var seen = Prefs.seen(), skip = [99, 16, 10751, 10770];
-    var all = Data.showcase().filter(function (p) { return p.kind === 'movie' && p.backdrop && Data.usable(p.app); });
+    var all = Data.filmMatches.slice();
+    Data.showcase().forEach(function (p) {
+      if (p.kind === 'movie' && p.backdrop && Data.usable(p.app) && !sameFilm(all, p)) all.push(p);
+    });
     var films = all.filter(function (p) {
       for (var g = 0; g < (p.genres || []).length; g++) if (skip.indexOf(p.genres[g]) >= 0) return false;
       return seen.indexOf('movie:' + p.id) < 0;
     });
     if (!films.length) films = all.filter(function (p) { return seen.indexOf('movie:' + p.id) < 0; });
+    return films;
+  }
+
+  /** For the phones to vote on: tonight's films, then more on the same services (a match stays, or it would vanish). */
+  function voteFilms() {
+    var films = nightFilms(), seen = Prefs.seen();
+    Data.deck.forEach(function (p) { if (seen.indexOf('movie:' + p.id) < 0 && !sameFilm(films, p)) films.push(p); });
+    return films;
+  }
+
+  /** What you both liked comes first; the rest in any order. */
+  function bothFirst(films) {
+    var ids = Data.filmMatches.map(function (m) { return m.id; });
+    var both = films.filter(function (p) { return ids.indexOf(p.id) >= 0; });
+    return both.concat(films.filter(function (p) { return ids.indexOf(p.id) < 0; }));
+  }
+
+  /** Says each new match once. */
+  function announceMatches() {
+    var said = Prefs.announced(), fresh = Data.filmMatches.filter(function (m) { return said.indexOf(m.id) < 0; });
+    if (!fresh.length) return;
+    Prefs.set('announced', said.concat(fresh.map(function (m) { return m.id; })).slice(-100));
+    toast(trf('You both picked {title}', {title: fresh[0].title}));
+  }
+
+  function movieNight() {
+    var films = nightFilms();
     if (!films.length) { toast(tr('No films to pick from right now.')); return; }
     for (var i = films.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1)), t = films[i];
       films[i] = films[j];
       films[j] = t;
     }
-    night = films;
+    night = bothFirst(films);
     saverIndex = 0;
     showSaver();
   }
@@ -2638,6 +2674,7 @@
   }
 
   Data.onChange(function () {
+    announceMatches();
     renderQuotes();
     renderCards();
     renderPanels();
@@ -2689,6 +2726,7 @@
     checkNight();
     Data.refresh();
     renderGreeting();
+    Data.sendFilms(voteFilms());
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();

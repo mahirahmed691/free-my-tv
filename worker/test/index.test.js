@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems, parseWarnings } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems, parseWarnings, matchPeople, cleanFilms, bothLike } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -544,4 +544,96 @@ test('/v1/salah needs the token and says when the page is not today\'s', async (
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// Film match
+
+const film = (id) => ({ id, title: 'Film ' + id, image: '/abc' + id + '.jpg', meta: 'Action', rating: 7.26 });
+const matchCall = (method, token, body) => worker.fetch(new Request('https://w.example/v1/match', {
+  method, headers: { Authorization: 'Bearer ' + token }, body: body ? JSON.stringify(body) : undefined,
+}), env);
+const deck = () => matchCall('POST', 'secret-token', { films: [film(1), film(2), film(3)] });
+
+test('film match: a film both like comes to the TV; one vote is not a match', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  await deck();
+  let body = await (await matchCall('POST', 'm-key', { id: 1, like: true })).json();
+  assert.deepEqual(body.matches, []);
+  assert.deepEqual(body.left.map((f) => f.id), [2, 3]);
+  await matchCall('POST', 'w-key', { id: 2, like: true });   // only Mariam likes 2
+  body = await (await matchCall('POST', 'w-key', { id: 1, like: true })).json();
+  assert.deepEqual(body.matches.map((f) => f.id), [1]);
+  assert.deepEqual((await (await matchCall('GET', 'secret-token')).json()).matches.map((f) => f.title), ['Film 1']);
+});
+
+test('film match: a film that leaves the TV leaves the matches, and DELETE votes again', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  await deck();
+  await matchCall('POST', 'm-key', { id: 1, like: true });
+  await matchCall('POST', 'w-key', { id: 1, like: true });
+  await matchCall('POST', 'secret-token', { films: [film(2)] });
+  assert.deepEqual((await (await matchCall('GET', 'secret-token')).json()).matches, []);
+  await matchCall('POST', 'secret-token', { films: [film(1), film(2)] });
+  assert.equal((await (await matchCall('GET', 'm-key')).json()).left.length, 1);
+  await matchCall('DELETE', 'm-key');
+  assert.equal((await (await matchCall('GET', 'm-key')).json()).left.length, 2);
+  assert.deepEqual((await (await matchCall('GET', 'secret-token')).json()).matches, []);
+});
+
+test('film match: each token does only its own job', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  env.ADMIN_TOKEN = 'Mahir=admin-key';
+  await deck();
+  assert.equal((await matchCall('GET', 'nope')).status, 401);
+  assert.equal((await matchCall('GET', 'admin-key')).status, 401);
+  assert.equal((await matchCall('DELETE', 'secret-token')).status, 401);
+  // A voter's key can't change the films, nor vote on one that isn't there; the TV's can't vote.
+  assert.equal((await matchCall('POST', 'm-key', { films: [film(9)] })).status, 400);
+  assert.equal((await matchCall('POST', 'm-key', { id: 9, like: true })).status, 400);
+  assert.equal((await matchCall('POST', 'm-key', { id: 1, like: 'yes' })).status, 400);
+  assert.equal((await (await matchCall('GET', 'm-key')).json()).total, 3);
+  assert.equal((await matchCall('POST', 'secret-token', { id: 1, like: true })).status, 400);
+  assert.equal((await (await matchCall('GET', 'm-key')).json()).left.length, 3);
+  assert.equal(env.CACHE.m.get('match:votes:mahir'), undefined);
+  // A key that votes opens nothing else.
+  for (const path of ['/v1/notes', '/v1/list', '/v1/fed', '/v1/tides']) assert.equal((await get(path, { Authorization: 'Bearer m-key' })).status, 401, path);
+});
+
+test('film match: the same films again cost no KV write', async () => {
+  await deck();
+  const writes = env.CACHE.writes;
+  const body = await (await matchCall('POST', 'secret-token', { films: [film(3), film(1), film(2)] })).json();
+  assert.equal(body.changed, false);
+  assert.equal(env.CACHE.writes, writes);
+});
+
+test('film match: the page is outside the token but inside ALLOWED_IPS, and holds no key', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  const r = await get('/match');
+  assert.equal(r.status, 200);
+  const csp = r.headers.get('Content-Security-Policy'), nonce = /script-src 'nonce-([^']+)'/.exec(csp)[1];
+  assert.match(csp, /default-src 'none'/);
+  const html = await r.text();
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.ok(!html.includes('m-key'));
+  env.ALLOWED_IPS = '203.0.113.1';
+  assert.equal((await get('/match', { 'CF-Connecting-IP': '198.51.100.9' })).status, 403);
+  assert.equal((await get('/match', { 'CF-Connecting-IP': '203.0.113.1' })).status, 200);
+});
+
+test('cleanFilms keeps a TMDB path only, drops bad entries, caps the list', () => {
+  const out = cleanFilms([film(1), film(1), { id: 'x', title: 'a' }, { id: 2 }, { id: 3, title: ' A  B ', image: 'https://evil.example/a.png', rating: 99 }, null]);
+  assert.deepEqual(out.map((f) => f.id), [1, 3]);
+  assert.equal(out[0].rating, 7.3);
+  assert.equal(out[1].title, 'A B');
+  assert.equal(out[1].image, '');
+  assert.equal(out[1].rating, 0);
+  assert.equal(cleanFilms(Array.from({ length: 60 }, (_, i) => film(i + 1))).length, 40);
+  assert.deepEqual(cleanFilms('nope'), []);
+});
+
+test('matchPeople and bothLike', () => {
+  assert.deepEqual(matchPeople('Mahir=a, Mariam=b,'), ['Mahir', 'Mariam']);
+  assert.deepEqual(bothLike([{ id: 1 }], [[{ id: 1, like: true }]]), []);   // one person is not a match
+  assert.deepEqual(bothLike([{ id: 1 }], [[{ id: 1, like: true }], [{ id: 1, like: false }]]), []);
 });

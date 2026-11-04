@@ -77,6 +77,8 @@ var Prefs = (function () {
     saverWatch: function () { return pick('saverWatch', false) === true; },
     /** Movie night's films you've watched or said you've seen ("movie:123"), newest last. */
     seen: function () { return pick('seen', []); },
+    /** Film matches already announced (ids), so a restart doesn't say them again. */
+    announced: function () { return pick('announced', []); },
     /** The day the morning briefing last showed ("Thu Oct 29 2026"). */
     briefed: function () { return pick('briefed', ''); },
     /** What the screensaver shows: 'photos' (the picks' photos, as it always has) or 'clock' (a clock and the weather). */
@@ -527,6 +529,51 @@ var Data = (function () {
       });
   }
 
+  var filmMatches = {}, matchIds = '', matchAt = 0, fetchingMatch = false, filmsSent = '', filmsAt = 0;
+
+  /** Asks which app each new match is on (a film can be a match without having been a pick). */
+  function learnMatches(list) {
+    var keep = {};
+    each(list, function (m, next) {
+      var p = keep[m.id] = filmMatches[m.id] || {id: m.id, kind: 'movie', title: m.title, backdrop: m.image, poster: m.image, meta: m.meta,
+        rating: m.rating, app: null, detailed: false};
+      if (p.detailed) next(); else details(p, function () { next(); });
+    }, function () { filmMatches = keep; changed(); });
+  }
+
+  /** What you both liked (the Worker's /v1/match), every 2 minutes. */
+  function refreshMatches() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.match || fetchingMatch || (now - matchAt < 120000 && now >= matchAt)) return;
+    fetchingMatch = true;
+    workerGet('/v1/match', function (err, body) {
+      fetchingMatch = false;
+      if (!err && !(body && body.matches)) err = new Error((body && body.error) || 'no matches');
+      noteFetch('match', err);
+      if (err) return;
+      matchAt = Date.now();
+      var ids = body.matches.map(function (m) { return m.id; }).join();
+      if (ids !== matchIds) { matchIds = ids; learnMatches(body.matches); }
+    });
+  }
+
+  /**
+   * Tells the Worker which films the phones can vote on, when that changes and at most every 10 minutes: the list fills
+   * up slowly as the picks' details arrive, and each change is a KV write.
+   */
+  function sendFilms(films) {
+    var now = Date.now(), list = films.slice(0, 40), ids = list.map(function (p) { return p.id; }).sort().join();
+    if (!WORKER.url || !WORKER.match || !deck.length || ids === filmsSent || (filmsAt && now - filmsAt < 600000 && now >= filmsAt)) return;
+    filmsAt = now;
+    request('POST', WORKER.url.replace(/\/+$/, '') + '/v1/match', {Authorization: 'Bearer ' + WORKER.token, 'Content-Type': 'application/json'},
+      JSON.stringify({films: list.map(function (p) {
+        return {id: p.id, title: p.title, image: p.poster || p.backdrop, meta: p.meta, rating: p.rating};
+      })}), function (err) {
+        if (!err) filmsSent = ids;
+        noteFetch('films', err);
+      });
+  }
+
   var fed = null, fedAt = 0, fetchingFed = false;
 
   /** When the cats were last fed (a phone's "Fed the cats"), every 2 minutes; only with pets and the Worker. */
@@ -830,7 +877,8 @@ var Data = (function () {
     })();
   }
 
-  function fetchList(done) {
+  /** TMDB's ids for the streaming services this TV has: done(error, ids). */
+  function appProviders(done) {
     tmdb('/watch/providers/movie?language=' + lang() + '&watch_region=' + REGION, function (err, res) {
       if (err) { done(err); return; }
       var ids = [];
@@ -839,6 +887,13 @@ var Data = (function () {
         if (s && usable(s[1])) ids.push(res.results[i].provider_id);
       }
       if (!ids.length) { done(new Error("none of the TV's streaming apps are on TMDB (or switched on in Picks from)")); return; }
+      done(null, ids);
+    });
+  }
+
+  function fetchList(done) {
+    appProviders(function (err, ids) {
+      if (err) { done(err); return; }
       var common = '&language=' + lang() + '&watch_region=' + REGION + '&with_watch_monetization_types=flatrate&include_adult=false'
           + '&sort_by=popularity.desc&with_watch_providers=' + encodeURIComponent(ids.join('|'))
           + (Prefs.hideAnimation() ? '&without_genres=' + ANIMATION : '');
@@ -904,6 +959,40 @@ var Data = (function () {
     }
   }
 
+  var deck = [], deckAt = 0, fetchingDeck = false;
+
+  /**
+   * Films for the phones to vote on, once a day: the picks are too few to swipe through, so well-liked films on the TV's
+   * services. Only the service's film list: a film's own details (which app) are asked for when it's a match.
+   */
+  function refreshDeck() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.match || !KEY || !installed.length || fetchingDeck || (now - deckAt < 86400000 && now >= deckAt)) return;
+    fetchingDeck = true;
+    appProviders(function (err, ids) {
+      var found = [];
+      function finish(e) {
+        fetchingDeck = false;
+        noteFetch('deck', e);
+        deckAt = e ? Date.now() - 23 * 3600000 : Date.now();   // after a failure, again in an hour
+        if (found.length) deck = found;
+      }
+      if (err) { finish(err); return; }
+      each([1, 2], function (page, next) {
+        tmdb('/discover/movie?vote_count.gte=300&vote_average.gte=6.5&language=' + lang() + '&watch_region=' + REGION
+            + '&with_watch_monetization_types=flatrate&include_adult=false&sort_by=popularity.desc&with_watch_providers='
+            + encodeURIComponent(ids.join('|')) + '&without_genres=99,16,10751,10770&page=' + page, function (e, r) {
+          for (var i = 0; !e && r.results && i < r.results.length; i++) {
+            addPick(found, r.results[i], 'movie');
+            var p = found[found.length - 1];
+            if (p && p.id === r.results[i].id) p.meta = (r.results[i].release_date || '').slice(0, 4);
+          }
+          next();
+        });
+      }, function () { finish(found.length ? null : new Error('TMDB returned no films')); });
+    });
+  }
+
   /** This hour's picks for the three tabs, without repeats (the screensaver shows them too). */
   function all() {
     var out = [], seen = {}, kinds = [null, 'movie', 'tv'];
@@ -934,7 +1023,7 @@ var Data = (function () {
     appFor: appFor,
     usable: usable,
     services: services,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshFed(); refreshWarnings(); refreshEpisodes(); refreshFootball(); refreshCalendar(); refreshSalah(); },
+    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshMatches(); refreshDeck(); refreshFed(); refreshWarnings(); refreshEpisodes(); refreshFootball(); refreshCalendar(); refreshSalah(); },
     /** Today's events still to come or under way ([{title, start, end, allDay}]), or []. */
     get agenda() {
       var now = Date.now();
@@ -951,6 +1040,15 @@ var Data = (function () {
     /** Who wrote it (the phone's name on the Worker), or ''. */
     get noteFrom() { return noteFrom; },
     get shopping() { return shopping; },
+    /** Films you both liked on your phones and can play here. */
+    get filmMatches() {
+      var out = [];
+      for (var id in filmMatches) if (filmMatches[id].detailed && usable(filmMatches[id].app)) out.push(filmMatches[id]);
+      return out;
+    },
+    /** More films for the phones to vote on. */
+    get deck() { return deck; },
+    sendFilms: sendFilms,
     tickOff: tickOff,
     get fed() { return fed; },
     get warnings() { return warnings; },
