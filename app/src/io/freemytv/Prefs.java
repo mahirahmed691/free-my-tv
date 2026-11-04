@@ -2,6 +2,7 @@ package io.freemytv;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.view.KeyEvent;
 
 import java.io.BufferedReader;
@@ -11,8 +12,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Settings changed on the TV itself (Free My TV > Settings). config.properties only gives the first
@@ -23,6 +26,10 @@ final class Prefs {
 
     /** Remote keys we handle, with the app each opens until the user picks another. Codes read from the TCL's log. */
     static final int KEY_NETFLIX = 4062, KEY_YOUTUBE = 190, KEY_PRIME = 4099, KEY_TCL_CHANNEL = 4020;
+    /** TCL's Settings button: NOTIFICATION, which only Google TV's home app (off in our mode) answers. */
+    static final int KEY_TCL_SETTINGS = KeyEvent.KEYCODE_NOTIFICATION;
+    /** A TCL Settings button's value that opens our quick settings panel over what's playing. */
+    static final String QUICK_PANEL = HomeMode.PKG + "#panel";
     /** The Netflix button on Vestel TVs and Formovie projectors: STEM_1, which the TV hands to its Netflix key receiver (dumpsys window policy). */
     static final int KEY_STEM_NETFLIX = KeyEvent.KEYCODE_STEM_1;
     /** KTC's (NextStar) Tabii button: BUTTON_8, which the TV hands to its hot-key receiver (its log: "keycode = 195"). */
@@ -36,6 +43,21 @@ final class Prefs {
     static final int KEY_SONY_CORE = SONY_KEY + 496, KEY_SONY_NETFLIX = SONY_KEY + 583, KEY_SONY_DISNEY = SONY_KEY + 491,
             KEY_SONY_PRIME = SONY_KEY + 490, KEY_SONY_YOUTUBE = SONY_KEY + 485, KEY_SONY_CRUNCHYROLL = SONY_KEY + 507,
             KEY_SONY_PLAY = SONY_KEY + 587;   // the Google Play button of older remotes: BUTTON_8 (BRAVIA 4K UR3, Android 10)
+    /** The SonyLIV button of the BRAVIA VU31's remote (India, Google TV 14), a key code of its own (#395). */
+    static final int KEY_SONY_LIV = 3004;
+
+    /**
+     * A Sony app button by scan code. The BRAVIA VU31's remote (Google TV 14, #395) sends other codes for the same
+     * buttons: BUTTON_4 with 758 for Netflix, BUTTON_2 with 652 for Prime Video, BUTTON_15 with 653 for YouTube.
+     */
+    static int sonyKey(int scanCode) {
+        switch (scanCode) {
+            case 758: return KEY_SONY_NETFLIX;
+            case 652: return KEY_SONY_PRIME;
+            case 653: return KEY_SONY_YOUTUBE;
+            default: return SONY_KEY + scanCode;
+        }
+    }
     /**
      * Xiaomi's app buttons (remotes sold in Russia), handed to its hot-key receiver (its log: "dealWithHotkey
      * keycode:199"). None has a default here: "Xiaomi default" (empty) leaves the key to the TV.
@@ -50,18 +72,33 @@ final class Prefs {
      */
     static final int KEY_HISENSE_PRIME = 295, KEY_HISENSE_YOUTUBE = KeyEvent.KEYCODE_BUTTON_3, KEY_HISENSE_DISNEY = 607,
             KEY_HISENSE_APPS = 284, KEY_HISENSE_SETTINGS = KeyEvent.KEYCODE_NOTIFICATION, KEY_HISENSE_PROFILE = 288;
+    /** Google TV Streamer's Vendor_18d1_Product_9451.kl; MACRO_1 (313) was added in API 34. */
+    static final int KEY_GOOGLE_YOUTUBE = KeyEvent.KEYCODE_BUTTON_3, KEY_GOOGLE_NETFLIX = KeyEvent.KEYCODE_BUTTON_4,
+            KEY_GOOGLE_CUSTOM = 313;
     /** A button's value that opens this home screen's All Apps. */
     static final String ALL_APPS = HomeMode.PKG + "#all";
-    static final int[] KEYS = RemoteKeys.HISENSE ? new int[] {KEY_HISENSE_PRIME, KEY_HISENSE_YOUTUBE, KEY_HISENSE_DISNEY,
+    /**
+     * The JVC G24's (Skyworth) Inputs button, one key here whichever way it comes (BUTTON_16 with scan code 383 or 79,
+     * or BUTTON_14 with 240: SkyworthRemote.shortcut), and its gear, NOTIFICATION; TV_SHORTCUTS and QUICK_SETTINGS
+     * are the values that open the TV's input list and our Quick Settings panel.
+     */
+    static final int KEY_JVC_SHORTCUT = 200_383, KEY_JVC_SETTINGS = KeyEvent.KEYCODE_NOTIFICATION;
+    static final String TV_SHORTCUTS = HomeMode.PKG + "#tvshortcuts";
+    static final String QUICK_SETTINGS = HomeMode.PKG + "#quicksettings";
+    static final int[] KEYS = RemoteKeys.GOOGLE_STREAMER
+            ? new int[] {KEY_GOOGLE_YOUTUBE, KEY_GOOGLE_NETFLIX, KEY_GOOGLE_CUSTOM}
+            : RemoteKeys.JVC_SKYWORTH ? new int[] {KEY_JVC_SHORTCUT, KEY_JVC_SETTINGS}
+            : RemoteKeys.HISENSE ? new int[] {KEY_HISENSE_PRIME, KEY_HISENSE_YOUTUBE, KEY_HISENSE_DISNEY,
                     KEY_HISENSE_APPS, KEY_HISENSE_SETTINGS, KEY_HISENSE_PROFILE}
             : RemoteKeys.SONY
             ? new int[] {KEY_SONY_CORE, KEY_SONY_NETFLIX, KEY_SONY_DISNEY, KEY_SONY_PRIME, KEY_SONY_YOUTUBE, KEY_SONY_CRUNCHYROLL,
-                    KEY_SONY_PLAY}
+                    KEY_SONY_PLAY, KEY_SONY_LIV}
             : RemoteKeys.STEM_NETFLIX ? new int[] {KEY_STEM_NETFLIX}
             : RemoteKeys.KTC ? new int[] {KEY_KTC_TABII}
+            : RemoteKeys.XIAOMI_PATCHWALL_ONLY ? new int[] {KEY_XIAOMI_PATCHWALL}
             : RemoteKeys.XIAOMI ? new int[] {KEY_MI, KEY_YOUTUBE, KEY_XIAOMI_PATCHWALL, KEY_XIAOMI_OKKO, KEY_XIAOMI_VK,
                     KEY_XIAOMI_RUTUBE, KEY_XIAOMI_KION, KEY_XIAOMI_WINK, KEY_XIAOMI_IVI}
-            : new int[] {KEY_NETFLIX, KEY_YOUTUBE, KEY_PRIME, KEY_TCL_CHANNEL};
+            : new int[] {KEY_NETFLIX, KEY_YOUTUBE, KEY_PRIME, KEY_TCL_CHANNEL, KEY_TCL_SETTINGS};
 
     /** Bumped by every change: screens compare it to know when to redraw. */
     static volatile int version;
@@ -78,6 +115,14 @@ final class Prefs {
     static boolean clock24() {
         return app != null && android.text.format.DateFormat.is24HourFormat(app);
     }
+
+    /** "auto" (the TV's own 12/24-hour setting), "24" or "12". */
+    static String clockFormat() {
+        String v = sp().getString("clock", "auto");
+        return v.equals("24") || v.equals("12") ? v : "auto";
+    }
+
+    static void setClockFormat(String v) { put("clock", v); }
 
     /** The app's context in this process (null before App.onCreate). */
     static Context context() {
@@ -115,6 +160,14 @@ final class Prefs {
         version++;
     }
 
+    /**
+     * Without bumping `version`: a new version makes the home screen start over (and fetch the weather and prices
+     * again). Continue Watching's lists don't need that: the home screen reads them on every return (reload).
+     */
+    private static void putQuietly(String key, Set<String> value) {
+        sp().edit().putStringSet(key, new HashSet<>(value)).apply();
+    }
+
     // MARK: - Language and units
 
     /** "auto" or a language code as picked ("pt", "fr", "zh-CN"…); Ui.applyLanguage finds its catalogue. */
@@ -141,6 +194,13 @@ final class Prefs {
 
     static void setCards(int n) { put("cards", n); }
 
+    /** Cartoons and anime out of the picks (Home Settings > Picks): hide_animation in config.properties until changed here. */
+    static boolean hideAnimation() {
+        return sp().getBoolean("hideAnimation", Config.HIDE_ANIMATION);
+    }
+
+    static void setHideAnimation(boolean hide) { put("hideAnimation", hide); }
+
     // MARK: - Picks from
 
     private static String offList;
@@ -164,11 +224,28 @@ final class Prefs {
         return offList;
     }
 
+    /** A service found by its app's name is keyed by its package, and is off until switched on. */
+    private static boolean byName(String key) {
+        return key.indexOf('.') >= 0;
+    }
+
+    private static String onServices() {
+        String saved = sp().getString("servicesOn", "");
+        return saved.isEmpty() ? "," : "," + saved + ",";
+    }
+
     static boolean serviceOff(String key) {
-        return key != null && offServices().contains("," + key + ",");
+        if (key == null) return false;
+        return byName(key) ? !onServices().contains("," + key + ",") : offServices().contains("," + key + ",");
     }
 
     static void setServiceOff(String key, boolean off) {
+        if (byName(key)) {
+            String on = onServices().replace("," + key + ",", ",");
+            if (!off) on += key + ",";
+            put("servicesOn", on.length() > 1 ? on.substring(1, on.length() - 1) : "");
+            return;
+        }
         String list = offServices();
         list = off ? (serviceOff(key) ? list : list + key + ",") : list.replace("," + key + ",", ",");
         put("servicesOff", list.length() > 1 ? list.substring(1, list.length() - 1) : "");
@@ -181,6 +258,10 @@ final class Prefs {
     }
 
     static void setTheme(String v) { put("theme", v); }
+
+    /** Wi-Fi/Ethernet, Bluetooth and USB icons at the top-left of the home screen. */
+    static boolean statusIcons() { return sp().getBoolean("statusicons", false); }
+    static void setStatusIcons(boolean on) { put("statusicons", on); }
 
     // MARK: - City
 
@@ -201,6 +282,49 @@ final class Prefs {
     static boolean saverWatch() { return sp().getBoolean("saverWatch", false); }
     static void setSaverWatch(boolean on) { put("saverWatch", on); }
 
+    // MARK: - Top of the home screen
+
+    static final String TOP_PICKS = "picks", TOP_CONTINUE = "continue", TOP_NONE = "none";
+    static final String[] TOP_CONTENT = {TOP_PICKS, TOP_CONTINUE, TOP_NONE};
+
+    /** What the cards under the title show: the recommendations (TMDB), what you were watching in your apps, or nothing. */
+    static String topContent() {
+        String v = sp().getString("topContent", TOP_PICKS);
+        return v.equals(TOP_CONTINUE) || v.equals(TOP_NONE) ? v : TOP_PICKS;
+    }
+
+    static void setTopContent(String v) { put("topContent", v); }
+
+    /** Apps left out of Continue Watching (Settings), by package. */
+    static Set<String> watchOff() { return new HashSet<>(sp().getStringSet("watchOff", new HashSet<>())); }
+    static void setWatchOff(Set<String> packages) { putQuietly("watchOff", packages); }
+
+    /** Single items hidden from Continue Watching (holding OK on a card), as WatchNext.hideKey. */
+    static Set<String> watchHidden() { return new HashSet<>(sp().getStringSet("watchHidden", new HashSet<>())); }
+    static void setWatchHidden(Set<String> keys) { putQuietly("watchHidden", keys); }
+
+    /** Recent Apps: "off" (the default: Android manages memory on its own), "drawer" (a shortcut in the bottom drawer and the
+     *  remote's app-switch key) or "home" (those, and pressing Home twice). The top button is its own choice (Top Buttons). */
+    static String recents() {
+        String v = sp().getString("recents", "off");
+        return v.equals("drawer") || v.equals("home") ? v : "off";
+    }
+
+    static void setRecents(String v) { put("recents", v); }
+
+    /**
+     * After the TV starts from off, never from standby (Home Settings > At power-on, #396 and #346): "tv" (the TV's
+     * choice), "home" (ours, where a TV app takes the screen at boot) or "live" (Live TV, where the TV starts on ours).
+     */
+    static final String[] POWER_ON = {"tv", "home", "live"};
+
+    static String powerOn() {
+        String v = sp().getString("powerOn", "tv");
+        return v.equals("home") || v.equals("live") ? v : "tv";
+    }
+
+    static void setPowerOn(String v) { put("powerOn", v); }
+
     // MARK: - Widgets and coins
 
     static boolean weather() { return sp().getBoolean("weather", true); }
@@ -215,6 +339,10 @@ final class Prefs {
         version++;
     }
 
+    /** Home Assistant's tiles in the drawer (HomeAssistant): off until turned on here, even with a server configured. */
+    static boolean homeAssistant() { return sp().getBoolean("homeAssistant", false); }
+    static void setHomeAssistant(boolean on) { put("homeAssistant", on); }
+
     static boolean quotes() { return sp().getBoolean("quotes", Config.SHOW_CRYPTO); }
     static void setQuotes(boolean on) { put("quotes", on); }
 
@@ -222,8 +350,28 @@ final class Prefs {
     static boolean photos() { return sp().getBoolean("photos", true); }
     static void setPhotos(boolean on) { put("photos", on); }
 
+    /**
+     * With an Immich server, where My Photos come from: "default" (none of yours: the picks' photos, as without
+     * Immich), "immich" (all its photos) or "album" (photoAlbum, its id; photoAlbumName to show).
+     */
+    static String photoSource() { return sp().getString("photoSource", "immich"); }
+    static String photoAlbum() { return sp().getString("photoAlbum", ""); }
+    static String photoAlbumName() { return sp().getString("photoAlbumName", ""); }
+
+    static void setPhotoSource(String source, String album, String name) {
+        sp().edit().putString("photoSource", source).putString("photoAlbum", album).putString("photoAlbumName", name).apply();
+        version++;
+    }
+
     static boolean coin(int i) { return sp().getBoolean("coin" + i, true); }
     static void setCoin(int i, boolean on) { put("coin" + i, on); }
+
+    /**
+     * Also list the TV's own system apps (Settings, Files, the manufacturer's apps) in All Apps and the shelf editor.
+     * Off keeps the list as it always was: the apps people installed, plus the system ones a TV needs there.
+     */
+    static boolean androidApps() { return sp().getBoolean("androidapps", false); }
+    static void setAndroidApps(boolean on) { put("androidapps", on); }
 
     // MARK: - TMDB key
 
@@ -235,6 +383,14 @@ final class Prefs {
 
     static void setTmdbKey(String key) {   // committed: ScreensaverAlone reads it from the main process
         sp().edit().putString("tmdbKey", key).commit();
+        version++;
+    }
+
+    /** The Watchmode key given on the TV, or "": then config.properties' one (Recs.watchmodeKey). Never logged. */
+    static String watchmodeKey() { return app == null ? "" : sp().getString("watchmodeKey", "").trim(); }
+
+    static void setWatchmodeKey(String key) {
+        sp().edit().putString("watchmodeKey", key).commit();
         version++;
     }
 
@@ -281,8 +437,8 @@ final class Prefs {
     // MARK: - Top buttons
 
     /**
-     * The round buttons at the top right, in order: "live", "inputs" and/or "settings". null until the user edits
-     * them (then HomeApps.TOP_DEFAULT applies); empty when they took all three off.
+     * The round buttons at the top right, in order (HomeApps.TOP_ALL). null until the user edits
+     * them (then HomeApps.TOP_DEFAULT applies); empty when they took them all off.
      */
     static List<String> topButtons() {
         String v = sp().getString("topButtons", null);
@@ -301,6 +457,25 @@ final class Prefs {
     // MARK: - Remote buttons
 
     private static String defaultApp(int keyCode) {
+        if (RemoteKeys.GOOGLE_STREAMER) {
+            return keyCode == KEY_GOOGLE_YOUTUBE ? "com.google.android.youtube.tv" : "";
+        }
+        if (RemoteKeys.JVC_SKYWORTH) {
+            if (keyCode == KEY_JVC_SHORTCUT) return TV_SHORTCUTS;
+            return keyCode == KEY_JVC_SETTINGS ? QUICK_SETTINGS : "";
+        }
+        if (RemoteKeys.SONY) {
+            if (!sonyGoogleTv()) return "";   // "Sony default": Sony's own receiver opens it
+            switch (keyCode) {
+                case KEY_SONY_NETFLIX: return "com.netflix.ninja";
+                case KEY_SONY_DISNEY: return "com.disney.disneyplus";
+                case KEY_SONY_PRIME: return "com.amazon.amazonvideo.livingroom";
+                case KEY_SONY_YOUTUBE: return "com.google.android.youtube.tv";
+                case KEY_SONY_CRUNCHYROLL: return "com.crunchyroll.crunchyroid";
+                case KEY_SONY_LIV: return "com.sonyliv";
+                default: return "";
+            }
+        }
         if (RemoteKeys.HISENSE) {
             switch (keyCode) {
                 case KEY_HISENSE_PRIME: return "com.amazon.amazonvideo.livingroom";
@@ -316,6 +491,7 @@ final class Prefs {
             case KEY_YOUTUBE: return "com.google.android.youtube.tv";
             case KEY_PRIME: return "com.amazon.amazonvideo.livingroom";
             case KEY_TCL_CHANNEL: return "";
+            case KEY_TCL_SETTINGS: return "com.android.tv.settings";   // TV Settings, as from our home screen (#289)
             case KEY_MI: return HomeMode.PKG;   // our home screen: the remote has no other Home button
             default: return "";
         }
@@ -328,8 +504,32 @@ final class Prefs {
         return new File(app.getFilesDir(), "remote-keys.txt");
     }
 
+    private static Boolean sonyGoogleTv;
+
+    /**
+     * A Sony with Google TV's home app (launcherx), which takes the app buttons from Sony's receiver and which Free My
+     * TV mode turns off: there "Sony default" does nothing (BRAVIA VU31, #395), so the buttons open their apps unless
+     * the person picks otherwise. Sony's Android TV sets (VH22) keep Sony's default.
+     */
+    private static boolean sonyGoogleTv() {
+        if (sonyGoogleTv == null) {
+            boolean has;
+            try {
+                app.getPackageManager().getApplicationInfo("com.google.android.apps.tv.launcherx",
+                        PackageManager.MATCH_DISABLED_COMPONENTS);
+                has = true;
+            } catch (PackageManager.NameNotFoundException e) {
+                has = false;
+            }
+            sonyGoogleTv = has;
+        }
+        return sonyGoogleTv;
+    }
+
     private static final String[] keyApps = new String[KEYS.length];   // null = the default
     private static long keysStamp = Long.MIN_VALUE;
+    /** Every button saved as Nothing (the key service off): a button added since stays Nothing too, not its default. */
+    private static boolean keysAllOff;
 
     /** A temporary file per process (two can start together after an update), synced before it replaces the old one. */
     private static boolean writeKeys(String text) {
@@ -365,6 +565,7 @@ final class Prefs {
             if (stamp != keysStamp) {
                 keysStamp = stamp;
                 java.util.Arrays.fill(keyApps, null);
+                keysAllOff = false;
                 if (stamp != 0) {
                     try (BufferedReader r = new BufferedReader(new FileReader(f))) {
                         String line;
@@ -376,10 +577,13 @@ final class Prefs {
                         }
                     } catch (IOException ignored) {
                     }
+                    boolean saved = false, on = false;
+                    for (String v : keyApps) if (v != null) { saved = true; on |= !v.isEmpty(); }
+                    keysAllOff = saved && !on;
                 }
             }
             for (int i = 0; i < KEYS.length; i++) if (KEYS[i] == keyCode && keyApps[i] != null) return keyApps[i];
-            return defaultApp(keyCode);
+            return keysAllOff ? "" : defaultApp(keyCode);
         }
     }
 

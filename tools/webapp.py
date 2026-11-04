@@ -15,7 +15,7 @@ import translate  # noqa: E402  (the catalogues and the keys the web app uses)
 
 GENERIC = {'tmdbKey': '', 'tmdbRegion': '', 'latitude': '', 'longitude': '', 'city': '', 'language': 'auto',
            'currency': '', 'temperature': 'auto', 'theme': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': [],
-           'shelfApps': [], 'drawerFirst': False}
+           'shelfApps': [], 'drawerFirst': False, 'openPicksIn': 'apps'}
 
 
 def config_from_args(args):
@@ -122,6 +122,7 @@ def read_config(path):
         # What was built, for About this TV (written by scripts/tvconfig.py; empty otherwise).
         'build': {'commit': values.get('build_commit', ''), 'tag': values.get('build_tag', ''),
                   'settings': values.get('settings_hash', ''), 'devModeUntil': int(values.get('devmode_until', '0') or 0)},
+        'openPicksIn': 'nuvio' if values.get('open_picks_in', '').strip().lower() == 'nuvio' else 'apps',
     }
 
 

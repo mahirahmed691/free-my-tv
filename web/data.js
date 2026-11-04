@@ -8,6 +8,28 @@
  */
 var CONFIG = window.CONFIG || {};
 
+/**
+ * Weekday and month names for formatDate on TVs without Intl (strings.js), here where translate.py finds them.
+ * "months" is the form next to a day ("28 октября"), as the catalogues' patterns use it.
+ */
+I18N.dateNames = function (kind) {
+  if (kind === 'months') {
+    return [tr('monthday|January'), tr('monthday|February'), tr('monthday|March'), tr('monthday|April'),
+      tr('monthday|May'), tr('monthday|June'), tr('monthday|July'), tr('monthday|August'), tr('monthday|September'),
+      tr('monthday|October'), tr('monthday|November'), tr('monthday|December')];
+  }
+  if (kind === 'shortMonths') {
+    return [tr('month|Jan'), tr('month|Feb'), tr('month|Mar'), tr('month|Apr'), tr('month|May'), tr('month|Jun'),
+      tr('month|Jul'), tr('month|Aug'), tr('month|Sep'), tr('month|Oct'), tr('month|Nov'), tr('month|Dec')];
+  }
+  if (kind === 'weekdays') {
+    return [tr('weekday|Sunday'), tr('weekday|Monday'), tr('weekday|Tuesday'), tr('weekday|Wednesday'),
+      tr('weekday|Thursday'), tr('weekday|Friday'), tr('weekday|Saturday')];
+  }
+  return [tr('weekday|Sun'), tr('weekday|Mon'), tr('weekday|Tue'), tr('weekday|Wed'), tr('weekday|Thu'),
+    tr('weekday|Fri'), tr('weekday|Sat')];
+};
+
 var Place = (function () {
   'use strict';
   var EURO = /^(AT|BE|BG|CY|DE|EE|ES|FI|FR|GR|HR|IE|IT|LT|LU|LV|MT|NL|PT|SI|SK)$/;
@@ -57,12 +79,18 @@ var Prefs = (function () {
     seen: function () { return pick('seen', []); },
     /** The day the morning briefing last showed ("Thu Oct 29 2026"). */
     briefed: function () { return pick('briefed', ''); },
+    /** What the screensaver shows: 'photos' (the picks' photos, as it always has) or 'clock' (a clock and the weather). */
+    saver: function () { return pick('saver', 'photos') === 'clock' ? 'clock' : 'photos'; },
+    /** Dimming over the picture, for a dark room: 'off', 'low', 'medium', 'high' or 'auto' (medium at night). */
+    dim: function () { return pick('dim', 'off'); },
     /** The weather card's forecast: 'hours' (the next 6 hours) or 'days' (the next 5 days). */
     forecast: function () { return pick('forecast', 'hours') === 'days' ? 'days' : 'hours'; },
     quotes: function () { return pick('quotes', CONFIG.showCrypto !== false); },
     coin: function (i) { var c = pick('coins', null); return c ? c[i] !== false : true; },
     /** Picks per tab: 3 (as it was) up to 6. */
     cards: function () { var n = pick('cards', 3); return n < 3 ? 3 : n > 6 ? 6 : n; },
+    /** Cartoons and anime out of the picks (Home Settings), or config.properties' hide_animation. */
+    hideAnimation: function () { return pick('hideAnimation', CONFIG.hideAnimation === true) === true; },
     shelf: function () { return pick('shelf', null); },
     /** The shelf_apps of the build that last set the shelf, so a new one wins once over the TV's choice. */
     shelfConfig: function () { return pick('shelfConfig', ''); },
@@ -82,6 +110,7 @@ var Prefs = (function () {
       if (off) list.push(key);
       this.set('servicesOff', list);
     },
+    openPicks: function () { return pick('openPicks', CONFIG.openPicksIn === 'nuvio' ? 'nuvio' : 'apps'); },
     set: function (name, value) { v[name] = value; save(); this.version++; },
     setCoin: function (i, on) {
       var c = (pick('coins', null) || [true, true, true, true]).slice();
@@ -121,6 +150,21 @@ var Data = (function () {
   /** The last failure per source, for About this TV; a success clears it. */
   var failures = {};
   function noteFetch(source, err) { failures[source] = err ? {at: Date.now(), error: err.message || String(err)} : null; }
+  /**
+   * Open-Meteo, over plain http where https fails: its certificate chains to Let's Encrypt's ISRG root, which 2015 and
+   * 2016 TVs (Tizen 2.3 and 2.4) don't trust. Only the city's coordinates and the forecast go in the clear. Each call
+   * tries https first, so a newer TV whose request once timed out doesn't stay on http.
+   */
+  function getMeteo(path, done) {
+    get('https://' + path, {}, function (err, body) {
+      // A certificate the TV doesn't trust ends as a network error: status 0, or onerror.
+      if (err && /^(no connection|HTTP 0)$/.test(err.message)) {
+        get('http://' + path, {}, done);
+        return;
+      }
+      done(err, body);
+    });
+  }
 
   var listeners = [];
   function changed() { for (var i = 0; i < listeners.length; i++) listeners[i](); }
@@ -182,8 +226,7 @@ var Data = (function () {
     if (fetchingWeather || (now - weatherAt < 30 * 60000 && now >= weatherAt)) return;
     fetchingWeather = true;
     var at = place();
-    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + Prefs.latitude() + '&longitude=' + Prefs.longitude() + QUERY;
-    get(url, {}, function (err, body) {
+    getMeteo('api.open-meteo.com/v1/forecast?latitude=' + Prefs.latitude() + '&longitude=' + Prefs.longitude() + QUERY, function (err, body) {
       fetchingWeather = false;
       if (at !== place()) { refreshWeather(); return; }   // another city was picked meanwhile
       noteFetch('weather', err);
@@ -198,8 +241,8 @@ var Data = (function () {
   /** Places with this name (Open-Meteo, in the app's language): done(error, [{label, city, lat, lon}]). */
   function findCity(name, done) {
     var lang = I18N.lang.replace(/-.*/, '');   // Open-Meteo takes the language without the country
-    get('https://geocoding-api.open-meteo.com/v1/search?count=10&format=json&language=' + lang + '&name='
-        + encodeURIComponent(name.trim()), {}, function (err, body) {
+    getMeteo('geocoding-api.open-meteo.com/v1/search?count=10&format=json&language=' + lang + '&name='
+        + encodeURIComponent(name.trim()), function (err, body) {
       if (err) { done(err); return; }
       var results = (body && body.results) || [], out = [], seen = {};
       for (var i = 0; i < results.length; i++) {
@@ -270,17 +313,20 @@ var Data = (function () {
     fetchingPrices = true;
     var symbols = coins.map(function (i) { return '%22' + COINS[i] + QUOTE + '%22'; }).join(',');
     var path = '/api/v3/ticker/24hr?type=MINI&symbols=%5B' + symbols + '%5D';
-    // Binance.com refuses the US (HTTP 451); Binance.US answers the same call in dollars.
-    var hosts = ['https://api.binance.com', 'https://api.binance.us'];
+    // Binance.com refuses the US (HTTP 451); Binance.US answers the same call in dollars. data-api.binance.vision is
+    // Binance's own address for public market data, with Binance.com's pairs on another domain and certificate chain:
+    // it answers where a network blocks or intercepts api.binance.com (#375). A refusal skips it.
+    var hosts = ['https://api.binance.com', 'https://data-api.binance.vision', 'https://api.binance.us'];
     (function next(h, refused) {
       get(hosts[h] + path, {}, function (err, body) {
         // A pair Binance doesn't list (HTTP 400): the prices go in dollars. Binance.US has only dollar pairs: its 400
         // counts only where Binance.com refuses the US (HTTP 451), not after a timeout or a 5xx there.
-        if (err && err.message === 'HTTP 400' && QUOTE !== 'USDT' && (h === 0 || refused)) { fetchingPrices = false; inDollars(); refreshPrices(); return; }
+        if (err && err.message === 'HTTP 400' && QUOTE !== 'USDT' && (h < 2 || refused)) { fetchingPrices = false; inDollars(); refreshPrices(); return; }
         // Halted: dollars for this run, not saved like the 400's (the market may open again).
         if (!err && QUOTE !== 'USDT' && halted(body)) { fetchingPrices = false; CURRENCY = 'USD'; QUOTE = 'USDT'; refreshPrices(); return; }
         if (err || !parsePrices(body)) {
-          if (h + 1 < hosts.length && !(err && err.message === 'HTTP 400')) next(h + 1, err && err.message === 'HTTP 451');
+          var refusal = !!err && err.message === 'HTTP 451';
+          if (h + 1 < hosts.length && !(err && err.message === 'HTTP 400')) next(refusal ? 2 : h + 1, refused || refusal);
           else { fetchingPrices = false; noteFetch('prices', err || new Error('no prices')); }
           return;
         }
@@ -634,7 +680,7 @@ var Data = (function () {
   }
 
   function sourceStamp() {
-    var s = KEY.length + ':' + KEY.slice(-6) + ':' + REGION + (CONFIG.hideAnimation ? ':no-animation' : '');
+    var s = KEY.length + ':' + KEY.slice(-6) + ':' + REGION + (Prefs.hideAnimation() ? ':no-animation' : '');
     for (var i = 0; i < SERVICES.length; i++) s += usable(SERVICES[i][1]) ? '1' : '0';
     return s;
   }
@@ -751,7 +797,7 @@ var Data = (function () {
     });
   }
 
-  /** TMDB's Animation genre (movies and shows: cartoons and anime), left out with hide_animation=true. */
+  /** TMDB's Animation genre (movies and shows: cartoons and anime), left out with Cartoons and anime off. */
   var ANIMATION = 16;
 
   function animated(o) {
@@ -761,7 +807,7 @@ var Data = (function () {
 
   function addPick(list, o, kind) {
     if (!o.backdrop_path) return;
-    if (CONFIG.hideAnimation && animated(o)) return;
+    if (Prefs.hideAnimation() && animated(o)) return;
     list.push({id: o.id, kind: kind, title: kind === 'movie' ? o.title : o.name, backdrop: o.backdrop_path, poster: o.poster_path || '', meta: '', app: null, detailed: false,
       genres: o.genre_ids || [], rating: o.vote_average || 0});
   }
@@ -795,7 +841,7 @@ var Data = (function () {
       if (!ids.length) { done(new Error("none of the TV's streaming apps are on TMDB (or switched on in Picks from)")); return; }
       var common = '&language=' + lang() + '&watch_region=' + REGION + '&with_watch_monetization_types=flatrate&include_adult=false'
           + '&sort_by=popularity.desc&with_watch_providers=' + encodeURIComponent(ids.join('|'))
-          + (CONFIG.hideAnimation ? '&without_genres=' + ANIMATION : '');
+          + (Prefs.hideAnimation() ? '&without_genres=' + ANIMATION : '');
       var hot = {movie: [], tv: []}, fresh = {movie: [], tv: []};
       each(['movie', 'tv'], function (kind, next) {
         tmdb('/trending/' + kind + '/week?language=' + lang(), function (e, r) {

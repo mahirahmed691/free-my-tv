@@ -22,7 +22,8 @@ final class Capabilities {
 
     /** An option's needs. */
     static final String NEED_ADB = "adb", NEED_REMOTE_BUTTONS = "remote-buttons", NEED_OVERLAY = OVERLAY,
-            NEED_LIVE_TV = "live-tv", NEED_LISTENER = LISTENER;
+            NEED_LIVE_TV = "live-tv", NEED_LISTENER = LISTENER, NEED_SWITCH = "switch",
+            NEED_HOME_ASSISTANT = "home-assistant", NEED_APP_STORE = "app-store";
 
     /** null where this TV has what `need` names; else why not, and what would change it, for the person to read. */
     static String missing(Context c, String need) {
@@ -36,8 +37,16 @@ final class Capabilities {
             case NEED_LISTENER:
                 return !adb(c) ? Ui.tr("Needs Free My TV mode: turn it on in Home Screen.")
                         : refused(c, LISTENER) ? Ui.tr("This TV doesn't let apps see what's playing.") : null;
+            case NEED_HOME_ASSISTANT:
+                return !HomeAssistant.hasEntities()
+                        ? Ui.tr("None of home_assistant_entities can be a button (see the README).")
+                        : !HomeAssistant.hasToken(c) ? Ui.tr("Send Home Assistant's token from a computer (see the README).") : null;
             case NEED_LIVE_TV:
                 return HomeApps.liveTv(c) != null ? null : Ui.tr("This TV has no live TV (antenna or cable) to open.");
+            case NEED_APP_STORE:
+                return HomeApps.storePackage(c) != null ? null : Ui.tr("This TV has no supported app store to open.");
+            case NEED_SWITCH:   // where the switch must not run; a TV already in Free My TV mode can still go back
+                return HomeMode.phone(c) ? HomeMode.phoneText() : HomeMode.BRICKS && !adb(c) ? HomeMode.bricksText() : null;
             default:
                 return null;
         }
