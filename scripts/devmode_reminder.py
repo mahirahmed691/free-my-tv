@@ -7,7 +7,8 @@ Due 7 days before Developer Mode runs out (the TV removes developer apps then), 
 replaced, so each release leaves exactly one. Does nothing without the date, or off macOS.
 
 Where Reminders refuses (the terminal isn't allowed under Privacy & Security > Automation), it opens a calendar event
-instead, which needs no permission: Calendar asks once to add it. Its UID stays the same, so a later one replaces it.
+instead, which needs no permission: Calendar asks to add it only when the date changes (out/devmode-reminder.ics holds
+the last one). Its UID stays the same, so a later one replaces it.
 """
 import datetime
 import os
@@ -32,6 +33,11 @@ def calendar_event(due, stamp):
 
 def open_event(due):
     os.makedirs(os.path.dirname(ICS), exist_ok=True)
+    if os.path.exists(ICS):
+        with open(ICS, encoding='utf-8', newline='') as f:
+            if 'DTSTART:' + due.strftime('%Y%m%dT%H%M%S') in f.read():
+                print('Calendar already has the reminder for %s.' % due.strftime('%a %d %b, %H:%M'))
+                return
     with open(ICS, 'w', encoding='utf-8', newline='') as f:
         f.write(calendar_event(due, datetime.datetime.now(datetime.timezone.utc)))
     subprocess.run(['open', ICS], timeout=30)
