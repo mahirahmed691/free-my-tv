@@ -10,6 +10,7 @@ changed photos are converted. The originals are never touched. At most MAX photo
 
 Each folder inside photos_dir is a pet, named by the folder (~/Pictures/TV/Maya): its photos join the screensaver with
 its name, and scripts/tv_pet.swift cuts a square around its face (Apple's Vision) for the round photo by the greeting.
+scripts/tv_cutout.swift cuts the animal out of its photo for its visits to the home screen (macOS 14+; no visits without).
 out/photos/pets.json lists them, and out/photos/days.json the day each photo was taken (for "on this day").
 """
 import hashlib
@@ -99,7 +100,7 @@ def main():
     pets, count = [], 0
     for pet in sorted(n for n in os.listdir(folder) if os.path.isdir(os.path.join(folder, n)) and not n.startswith('.')):
         sub = os.path.join(folder, pet)
-        entry = {'name': pet, 'photos': [], 'faces': []}
+        entry = {'name': pet, 'photos': [], 'faces': [], 'cuts': []}
         for name in sorted(n for n in os.listdir(sub) if n.lower().endswith(EXTENSIONS) and not n.startswith('.')):
             if packed + count >= MAX:
                 break
@@ -115,7 +116,13 @@ def main():
             except RuntimeError as e:
                 failed.append('%s/%s (%s)' % (pet, name, e))
                 continue
-            size = os.path.getsize(cached) + os.path.getsize(face)
+            cut = os.path.join(CACHE, key + '-cut.png')
+            try:
+                if not os.path.exists(cut):
+                    convert(cached, cut, 'tv_cutout')
+            except RuntimeError as e:
+                print('photos: no cut-out of %s/%s (%s)' % (pet, name, e))
+            size = os.path.getsize(cached) + os.path.getsize(face) + (os.path.getsize(cut) if os.path.exists(cut) else 0)
             if total + size > MAX_MB * 1024 * 1024:
                 break
             total += size
@@ -125,6 +132,9 @@ def main():
                 shutil.copyfile(path, os.path.join(OUT, 'pets', '%03d%s.jpg' % (count, suffix)))
             entry['photos'].append('photos/pets/%03d.jpg' % count)
             entry['faces'].append('photos/pets/%03d-face.jpg' % count)
+            if os.path.exists(cut):
+                shutil.copyfile(cut, os.path.join(OUT, 'pets', '%03d-cut.png' % count))
+                entry['cuts'].append('photos/pets/%03d-cut.png' % count)
         if entry['photos']:
             pets.append(entry)
     if days:

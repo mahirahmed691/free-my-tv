@@ -814,3 +814,19 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #celebrate .heart { position: absolute; bottom: -90px; color: #FF375F; opacity: 0; line-height: 1; }
 #celebrate.on .heart { -webkit-animation: heart-rise 6s ease-out infinite; animation: heart-rise 6s ease-out infinite; }
 .lite #celebrate .heart { display: none; }
+
+/* A pet's visit: it rises from behind the shelf, cut off at the shelf's edge, and sways a little. */
+#visitor { position: absolute; overflow: hidden; visibility: hidden; pointer-events: none; }
+#visitor.on { visibility: visible; }
+#visitor .rise { position: absolute; top: 24px; -webkit-transform: translateY(108%); transform: translateY(108%);
+  -webkit-transition: -webkit-transform 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.12); transition: transform 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.12); }
+/* A long animal is often cut off by its photo's edge: that side fades instead of ending in a straight line. */
+#visitor .rise.long { -webkit-mask-image: -webkit-linear-gradient(left, rgba(0, 0, 0, 0), #000 16%); -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0), #000 16%); }
+#visitor.in .rise { -webkit-transform: translateY(0); transform: translateY(0); }
+#visitor img { display: block; width: 100%; -webkit-transform-origin: 50% 100%; transform-origin: 50% 100%;
+  -webkit-filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35)); filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35)); }
+.night #visitor img { -webkit-filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.1)); filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.1)); }
+@-webkit-keyframes pet-sway { from { -webkit-transform: rotate(-1.2deg); } to { -webkit-transform: rotate(1.2deg); } }
+@keyframes pet-sway { from { transform: rotate(-1.2deg); } to { transform: rotate(1.2deg); } }
+#visitor.in img { -webkit-animation: pet-sway 2.6s ease-in-out infinite alternate; animation: pet-sway 2.6s ease-in-out infinite alternate; }
+.lite #visitor img { -webkit-filter: none; filter: none; -webkit-animation: none !important; animation: none !important; }

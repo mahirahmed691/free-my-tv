@@ -84,6 +84,8 @@ def read_config(path):
                    'warnings': values.get('weather_warnings', 'false').lower() == 'true'},
         # The film's logo on its card, a glow in its colours and a slow drift in the pictures (off on low-memory TVs).
         'cinematic': values.get('cinematic', 'false').lower() == 'true',
+        # Now and then your pets (photos_dir's folders) come up from behind the shelf for a look.
+        'petVisits': values.get('pet_visits', 'false').lower() == 'true',
         # The morning briefing: the first time the home screen shows each morning, one card with the day.
         'briefing': values.get('briefing', 'false').lower() == 'true',
         # Shows you follow: "New episode today" from TMDB (comma separated names).

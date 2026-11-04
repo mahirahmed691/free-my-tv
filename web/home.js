@@ -764,7 +764,57 @@
   }
 
   /** What's covered needn't move: the drift stops under the screensavers. */
-  function coverHome() { setClass(body, 'covered', saverOn || ambientOn); }
+  function coverHome() {
+    setClass(body, 'covered', saverOn || ambientOn);
+    if (saverOn || ambientOn) endVisit();
+  }
+
+  // MARK: - Maya and Mish: now and then one comes up from behind the shelf for a look, then goes back
+
+  var visitAt = Date.now() + 2 * 60000, visitTurn = 0, visitTimer = 0, visiting = false, VISIT_MS = 14000;
+
+  function petVisit() {
+    var pets = (CONFIG.pets || []).filter(function (p) { return p.cuts && p.cuts.length; });
+    if (!CONFIG.petVisits || !pets.length || visiting || Date.now() < visitAt) return;
+    if (document.hidden || saverOn || ambientOn || celebrating || sheetOpen() || goodnightAt || st.zone === Z.DRAWER || st.zone === Z.PANEL
+      || $('briefing').className.indexOf('on') >= 0) { visitAt = Date.now() + 60000; return; }
+    var pet = pets[visitTurn++ % pets.length], img = new Image();
+    visiting = true;
+    img.onload = function () { showVisitor(img); };
+    img.onerror = function () { visiting = false; };
+    img.src = pet.cuts[Math.floor(Math.random() * pet.cuts.length)];
+    visitAt = Date.now() + (6 + Math.random() * 8) * 60000;   // rare enough to stay a surprise
+  }
+
+  /** A tall photo shows its head and chest over the shelf, a wide one all of it; on the side away from the wide card. */
+  function showVisitor(img) {
+    var v = $('visitor'), tall = img.naturalHeight > img.naturalWidth, width = tall ? 270 : 340, room = 30;
+    var full = width * img.naturalHeight / img.naturalWidth, height = (tall ? Math.min(full, 250) : full - 30) + 24;   // paws behind the shelf
+    var shelf = $('platter').offsetTop, away = st.card < 2 ? 1510 : 130;
+    v.innerHTML = '';
+    v.style.left = (away - room) + 'px';
+    v.style.top = (shelf + 8 - height) + 'px';
+    v.style.width = (width + 2 * room) + 'px';
+    v.style.height = height + 'px';
+    var rise = el('div', tall ? 'rise' : 'rise long', v);
+    rise.style.left = room + 'px';
+    rise.style.width = width + 'px';
+    rise.appendChild(img);
+    setClass(v, 'on', true);
+    setTimeout(function () { setClass(v, 'in', true); }, 40);
+    visitTimer = setTimeout(function () {
+      setClass(v, 'in', false);
+      visitTimer = setTimeout(endVisit, 1000);
+    }, VISIT_MS);
+  }
+
+  function endVisit() {
+    if (!visiting) return;
+    visiting = false;
+    clearTimeout(visitTimer);
+    setClass($('visitor'), 'in', false);
+    setClass($('visitor'), 'on', false);
+  }
 
   var bgUrl = null, bgFront = 'bgA';
 
@@ -2838,6 +2888,7 @@
     renderGreeting();
     Data.sendFilms(voteFilms());
     announceMatches();
+    petVisit();
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();
