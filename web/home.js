@@ -2464,12 +2464,66 @@
     return both.concat(films.filter(function (p) { return ids.indexOf(p.id) < 0; }));
   }
 
-  /** Says each new match once. */
+  /** Celebrates each new match once, one at a time, when someone's there and nothing else is on screen. */
   function announceMatches() {
     var said = Prefs.announced(), fresh = Data.filmMatches.filter(function (m) { return said.indexOf(m.id) < 0; });
-    if (!fresh.length) return;
-    Prefs.set('announced', said.concat(fresh.map(function (m) { return m.id; })).slice(-100));
-    toast(trf('You both picked {title}', {title: fresh[0].title}));
+    if (!fresh.length || celebrating || document.hidden || saverOn || ambientOn || sheetOpen() || goodnightAt
+      || $('briefing').className.indexOf('on') >= 0) return;
+    Prefs.set('announced', said.concat(fresh[0].id).slice(-100));
+    celebrate(fresh[0]);
+  }
+
+  // MARK: - A film you both picked: its picture, hearts, and a pink flash from the lights
+
+  var celebrating = null, celebrateTimer = 0, HEARTS = 18;
+
+  function celebrate(p) {
+    celebrating = p;
+    idleAt = Date.now();
+    var box = $('celebrate'), target = pickTarget(p);
+    box.innerHTML = '';
+    el('div', 'layer photo', box).style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w1280') + ')';
+    el('div', 'layer shade', box);
+    for (var i = 0; i < HEARTS; i++) {
+      var h = el('div', 'heart', box, '\u2665');
+      h.style.left = (3 + 94 * i / (HEARTS - 1)) + '%';
+      h.style.fontSize = (34 + (i * 37) % 60) + 'px';
+      h.style.webkitAnimationDelay = h.style.animationDelay = ((i * 7) % HEARTS) * 0.33 + 's';
+    }
+    if (p.poster) el('div', 'poster', box).style.backgroundImage = 'url(' + Data.image(p.poster, 'w500') + ')';
+    var text = el('div', 'text', box);
+    el('div', 'kicker', text, tr('Film match'));
+    el('div', 'big', text, trf('You both picked {title}', {title: p.title}));
+    if (p.meta) el('div', 'meta', text, p.meta);
+    if (target) el('div', 'hint', text, trf('Press OK to watch on {app} · any other button to close', {app: target.app.title}));
+    setClass(box, 'on', true);
+    flashLights();
+    celebrateTimer = setTimeout(closeCelebration, 30000);
+  }
+
+  /** OK watches it, in movie mode as Movie night does; any other key only closes. True: a key was used here. */
+  function closeCelebration(k) {
+    var p = celebrating;
+    if (!p) return false;
+    celebrating = null;
+    clearTimeout(celebrateTimer);
+    setClass($('celebrate'), 'on', false);
+    var target = k === TV.keys.ok ? pickTarget(p) : null;
+    if (target) {
+      markSeen(p);
+      if (lights.length && !movie) toggleMovie();
+      launcher(target.app.id, target.app.title, target.params)();
+    }
+    return true;
+  }
+
+  /** The lights that are on turn pink for a moment, then back as each was. Movie mode's dim room stays dim. */
+  function flashLights() {
+    if (movie) return;
+    var list = ambientLights().filter(function (l) { return l.on && l.ok; });
+    var was = list.map(function (l) { return {on: l.on, brightness: l.brightness, temp: l.temp, hue: l.hue, sat: l.sat}; });
+    list.forEach(function (l) { setLight(l, {hue: 340, saturation: 85, color_temp: 0, brightness: Math.max(l.brightness || 0, 80)}); });
+    setTimeout(function () { restoreLights(list, was); }, 4000);
   }
 
   function movieNight() {
@@ -2654,7 +2708,7 @@
 
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
-    if (cancelGoodnight() || closeBriefing() || (k === TV.keys.back && stopAdhan())) { idleAt = Date.now(); e.preventDefault(); return; }
+    if (closeCelebration(k) || cancelGoodnight() || closeBriefing() || (k === TV.keys.back && stopAdhan())) { idleAt = Date.now(); e.preventDefault(); return; }
     if (poke(k)) { e.preventDefault(); return; }   // the first press only wakes the screen (or OK watches)
     if (typing(k)) return;
     if (k === TV.keys.left) move(-1, 0);
@@ -2758,7 +2812,7 @@
   document.addEventListener('webOSRelaunch', reopened);   // LG: opened again while running
   window.addEventListener('appcontrol', reopened);        // Samsung: the same
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) { hideSaver(); hideAmbient(); stopAdhan(); return; }
+    if (document.hidden) { hideSaver(); hideAmbient(); stopAdhan(); closeCelebration(); return; }
     idleAt = Date.now();
     setTimeout(maybeBrief, 5000);
     loadApps(function () { renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
@@ -2783,6 +2837,7 @@
     Data.refresh();
     renderGreeting();
     Data.sendFilms(voteFilms());
+    announceMatches();
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();

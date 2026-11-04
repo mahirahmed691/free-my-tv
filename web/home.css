@@ -795,3 +795,22 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cine.covered #sky canvas, .cine.covered .card .back { -webkit-animation-play-state: paused; animation-play-state: paused; }
 .lite #glow, .flat #glow { display: none; }
 .lite .card .back, .lite #sky canvas, .flat .card .back, .flat #sky canvas { -webkit-animation: none !important; animation: none !important; }
+
+/* A film you both picked (Film match): over everything but Goodnight, any key closes it. */
+#celebrate { z-index: 6; background: #0B0B0D; opacity: 0; visibility: hidden; overflow: hidden; -webkit-transition: opacity 0.5s, visibility 0s 0.5s; transition: opacity 0.5s, visibility 0s 0.5s; }
+#celebrate.on { opacity: 1; visibility: visible; -webkit-transition-delay: 0s; transition-delay: 0s; }
+#celebrate .photo { background-size: cover; background-position: center top; }
+#celebrate .shade { background: -webkit-linear-gradient(left, rgba(11, 11, 13, 0.94), rgba(11, 11, 13, 0.62) 62%, rgba(11, 11, 13, 0.3));
+  background: linear-gradient(90deg, rgba(11, 11, 13, 0.94), rgba(11, 11, 13, 0.62) 62%, rgba(11, 11, 13, 0.3)); }
+#celebrate .poster { position: absolute; left: 150px; top: 200px; width: 454px; height: 680px; border-radius: 26px; background-size: cover; background-position: center;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 3px rgba(255, 255, 255, 0.85); }
+#celebrate .text { position: absolute; left: 680px; right: 130px; top: 50%; color: #F5F5F7; -webkit-transform: translateY(-50%); transform: translateY(-50%); }
+#celebrate .kicker { font-size: 26px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #FF6482; }
+#celebrate .big { margin-top: 18px; font-size: 76px; font-weight: 700; line-height: 1.08; letter-spacing: -0.01em; }
+#celebrate .meta { margin-top: 24px; font-size: 30px; font-weight: 500; color: rgba(245, 245, 247, 0.72); }
+#celebrate .hint { margin-top: 44px; font-size: 26px; color: rgba(245, 245, 247, 0.82); }
+@-webkit-keyframes heart-rise { 0% { opacity: 0; -webkit-transform: translateY(0) scale(0.7); } 15% { opacity: 0.85; } 100% { opacity: 0; -webkit-transform: translateY(-1250px) scale(1.15); } }
+@keyframes heart-rise { 0% { opacity: 0; transform: translateY(0) scale(0.7); } 15% { opacity: 0.85; } 100% { opacity: 0; transform: translateY(-1250px) scale(1.15); } }
+#celebrate .heart { position: absolute; bottom: -90px; color: #FF375F; opacity: 0; line-height: 1; }
+#celebrate.on .heart { -webkit-animation: heart-rise 6s ease-out infinite; animation: heart-rise 6s ease-out infinite; }
+.lite #celebrate .heart { display: none; }
