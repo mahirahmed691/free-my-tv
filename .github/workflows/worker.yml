@@ -33,5 +33,10 @@ jobs:
           node-version: "22"
       - run: npm test
       - name: Deploy
-        if: env.CLOUDFLARE_API_TOKEN != ''
-        run: npx --yes wrangler@4.150.0 deploy
+        run: |
+          # A run that skips this would read as a success with the old Worker still live.
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo '::error::Nothing was deployed: set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the repository secrets.'
+            exit 1
+          fi
+          npx --yes wrangler@4.150.0 deploy

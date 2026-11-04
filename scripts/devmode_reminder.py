@@ -5,12 +5,37 @@
 
 Due 7 days before Developer Mode runs out (the TV removes developer apps then), at 7 pm. The one it made before is
 replaced, so each release leaves exactly one. Does nothing without the date, or off macOS.
+
+Where Reminders refuses (the terminal isn't allowed under Privacy & Security > Automation), it opens a calendar event
+instead, which needs no permission: Calendar asks once to add it. Its UID stays the same, so a later one replaces it.
 """
 import datetime
+import os
 import subprocess
 import sys
 
 NAME = 'Extend LG Developer Mode (Free My TV)'
+BODY = 'Developer Mode app on the TV > EXTEND, or the TV removes developer apps.'
+ICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'out', 'devmode-reminder.ics')
+
+
+def calendar_event(due, stamp):
+    """An iCalendar event at the due time, with an alert."""
+    start = due.strftime('%Y%m%dT%H%M%S')
+    return '\r\n'.join([
+        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Free My TV//Developer Mode//EN', 'BEGIN:VEVENT',
+        'UID:devmode-reminder@freemytv.local', 'DTSTAMP:' + stamp.strftime('%Y%m%dT%H%M%SZ'), 'SEQUENCE:%d' % stamp.timestamp(),
+        'DTSTART:' + start, 'DURATION:PT15M', 'SUMMARY:' + NAME, 'DESCRIPTION:' + BODY,
+        'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + NAME, 'TRIGGER:PT0M', 'END:VALARM',
+        'END:VEVENT', 'END:VCALENDAR', '']).replace('EXTEND,', 'EXTEND\\,')
+
+
+def open_event(due):
+    os.makedirs(os.path.dirname(ICS), exist_ok=True)
+    with open(ICS, 'w', encoding='utf-8', newline='') as f:
+        f.write(calendar_event(due, datetime.datetime.now(datetime.timezone.utc)))
+    subprocess.run(['open', ICS], timeout=30)
+    print('Reminders is not allowed, so Calendar is adding it instead: %s. Accept it there.' % due.strftime('%a %d %b, %H:%M'))
 
 
 def main():
@@ -41,7 +66,7 @@ end run'''
     if r.returncode == 0:
         print('Reminder set for %s: %s' % (due.strftime('%a %d %b, %H:%M'), NAME))
     else:
-        print('No reminder (Reminders said: %s)' % (r.stderr.strip()[:200] or 'no answer'))
+        open_event(due)
 
 
 if __name__ == '__main__':
