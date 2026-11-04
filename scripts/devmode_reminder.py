@@ -7,8 +7,8 @@ Due 7 days before Developer Mode runs out (the TV removes developer apps then), 
 replaced, so each release leaves exactly one. Does nothing without the date, or off macOS.
 
 Where Reminders refuses (the terminal isn't allowed under Privacy & Security > Automation), it opens a calendar event
-instead, which needs no permission: Calendar asks to add it only when the date changes (out/devmode-reminder.ics holds
-the last one). Its UID stays the same, so a later one replaces it.
+instead, which needs no permission: Calendar asks to add it only when the date changes (~/.freemytv/devmode-reminder.ics holds
+the last one, since a Google TV build empties out/). Its UID stays the same, so a later one replaces it.
 """
 import datetime
 import os
@@ -17,7 +17,7 @@ import sys
 
 NAME = 'Extend LG Developer Mode (Free My TV)'
 BODY = 'Developer Mode app on the TV > EXTEND, or the TV removes developer apps.'
-ICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'out', 'devmode-reminder.ics')
+ICS = os.path.expanduser('~/.freemytv/devmode-reminder.ics')
 
 
 def calendar_event(due, stamp):
