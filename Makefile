@@ -4,6 +4,7 @@
 #   make uninstall [TV=<ip>]    remove it from the TV
 #   make release [TV=<ip>]      build, install, tag the commit tv-YYYY-MM-DD-N (settings' hash, version), and
 #                               publish to the Worker's private Homebrew Channel repository (home only)
+#   make rollback [TO=<tag>]    the releases, or put that tag back on the TV (BUILD_ONLY=1 stops before the TV)
 #   make config-hash            the hash of the settings a build would use (secrets left out)
 #   make note MSG="..."         the note on the TV's home screen (through the Worker; no reinstall)
 #   make note-clear             remove it
@@ -16,7 +17,7 @@
 TV ?= 192.168.0.4
 PYTHON ?= python3
 
-.PHONY: build install uninstall release config-hash note note-clear revoke-phone new-phone-key type tapo-login tapo-list
+.PHONY: build install uninstall release rollback config-hash note note-clear revoke-phone new-phone-key type tapo-login tapo-list
 
 build:
 	BUILD_TAG='$(BUILD_TAG)' DEVMODE_UNTIL='$(DEVMODE_UNTIL)' $(PYTHON) scripts/tvconfig.py merge >/dev/null
@@ -69,6 +70,9 @@ release:
 	git tag -a "$$tag" -m "Installed on $(TV)" -m "config-sha256: $$hash" -m "version: $$(cat out/release-version)" && rm out/release-tag && echo "Tagged $$tag (config $$hash)"
 	@$(PYTHON) scripts/publish_repo.py "$$(cat out/release-version)" && rm -f out/release-version
 	@$(PYTHON) scripts/devmode_reminder.py "$$(cat out/devmode-until 2>/dev/null)" || true
+
+rollback:
+	@$(PYTHON) scripts/rollback.py $(TO) $(if $(TO),$(if $(BUILD_ONLY),--build-only,$(TV)))
 
 # Your Tapo lights: the TP-Link login once (only its hash is kept, in config.properties), then the lights it found.
 tapo-login:
