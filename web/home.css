@@ -853,3 +853,44 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .sky-live:not(.night) .card .meta { color: #2C2C2E; }
 .lite #sky .fall, .flat #sky .fall { display: none; }
 .lite #sky .stars canvas, .flat #sky .stars canvas { -webkit-animation: none !important; animation: none !important; }
+
+/* Maghrib's glow, all year: the sky warms from the horizon for twenty minutes. */
+#sky::after { content: ''; position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none;
+  background: -webkit-linear-gradient(bottom, rgba(255, 170, 70, 0.46), rgba(240, 130, 70, 0.2) 42%, rgba(240, 130, 70, 0) 72%);
+  background: linear-gradient(0deg, rgba(255, 170, 70, 0.46), rgba(240, 130, 70, 0.2) 42%, rgba(240, 130, 70, 0) 72%);
+  -webkit-transition: opacity 6s; transition: opacity 6s; }
+.maghrib #sky::after { opacity: 1; }
+
+/* Ramadan and the Eids (web/festive.js): what hangs from the top, behind the greeting, and gold where the focus is. */
+#festive { display: none; }
+.festive #festive { display: block; }
+#festive .hang { position: absolute; top: -8px; -webkit-transform-origin: 50% 0; transform-origin: 50% 0;
+  -webkit-animation: hang-sway 5s ease-in-out infinite alternate; animation: hang-sway 5s ease-in-out infinite alternate; }
+@-webkit-keyframes hang-sway { from { -webkit-transform: rotate(-1.6deg); } to { -webkit-transform: rotate(1.6deg); } }
+@keyframes hang-sway { from { transform: rotate(-1.6deg); } to { transform: rotate(1.6deg); } }
+#festive .thread { width: 2px; margin: 0 auto; background: rgba(217, 164, 65, 0.8); }
+#festive svg { display: block; margin: 0 auto; position: relative; }
+#festive .glow { position: absolute; left: 50%; bottom: -50px; width: 240px; height: 240px; margin-left: -120px; pointer-events: none;
+  background: -webkit-radial-gradient(center, circle, rgba(255, 190, 90, 0.42), rgba(255, 190, 90, 0) 66%);
+  background: radial-gradient(circle, rgba(255, 190, 90, 0.42), rgba(255, 190, 90, 0) 66%);
+  -webkit-animation: lamp-glow 3.4s ease-in-out infinite alternate; animation: lamp-glow 3.4s ease-in-out infinite alternate; }
+@-webkit-keyframes lamp-glow { from { opacity: 0.55; } to { opacity: 1; } }
+@keyframes lamp-glow { from { opacity: 0.55; } to { opacity: 1; } }
+.covered #festive .hang, .covered #festive .glow { -webkit-animation-play-state: paused; animation-play-state: paused; }
+.lite #festive .hang, .lite #festive .glow, .flat #festive .hang, .flat #festive .glow { -webkit-animation: none !important; animation: none !important; }
+/* "Ramadan Mubarak, …" is long: smaller, so it stops short of the lanterns. */
+.festive #title { font-size: 62px; top: 60px; }
+.festive #title .text { color: #7A5410; }
+.night.festive #title .text { color: #F6DB9B; }
+.festive .tab.on { color: #7A5410; }
+.night.festive .tab.on { color: #F6DB9B; }
+.festive .card .img::after { box-shadow: inset 0 0 0 3px #E3B04B; }
+.festive .tile.focus { box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), 0 0 0 3px #E3B04B; }
+
+#celebrate.moment .dusk { background: -webkit-linear-gradient(top, #0B1330, #2A2358 55%, #7C4A52); background: linear-gradient(#0B1330, #2A2358 55%, #7C4A52); }
+#celebrate.moment .heart { color: #F6DB9B; }
+#celebrate .text.center { left: 70px; right: 70px; text-align: center; }
+#celebrate .crescent { margin-bottom: 26px; }
+#celebrate .crescent svg { width: 124px; height: 128px; }
+#celebrate.moment .big { font-size: 100px; color: #F6DB9B; }
+#celebrate.moment .meta { font-size: 38px; }

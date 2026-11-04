@@ -2522,11 +2522,15 @@
     return both.concat(films.filter(function (p) { return ids.indexOf(p.id) < 0; }));
   }
 
+  /** Whether something full-screen may show: someone's on the home screen and nothing else is up. */
+  function screenFree() {
+    return !celebrating && !document.hidden && !saverOn && !ambientOn && !sheetOpen() && !goodnightAt && $('briefing').className.indexOf('on') < 0;
+  }
+
   /** Celebrates each new match once, one at a time, when someone's there and nothing else is on screen. */
   function announceMatches() {
     var said = Prefs.announced(), fresh = Data.filmMatches.filter(function (m) { return said.indexOf(m.id) < 0; });
-    if (!fresh.length || celebrating || document.hidden || saverOn || ambientOn || sheetOpen() || goodnightAt
-      || $('briefing').className.indexOf('on') >= 0) return;
+    if (!fresh.length || !screenFree()) return;
     Prefs.set('announced', said.concat(fresh[0].id).slice(-100));
     celebrate(fresh[0]);
   }
@@ -2540,6 +2544,7 @@
     idleAt = Date.now();
     var box = $('celebrate'), target = pickTarget(p);
     box.innerHTML = '';
+    setClass(box, 'moment', false);
     el('div', 'layer photo', box).style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w1280') + ')';
     el('div', 'layer shade', box);
     for (var i = 0; i < HEARTS; i++) {
@@ -2566,13 +2571,63 @@
     celebrating = null;
     clearTimeout(celebrateTimer);
     setClass($('celebrate'), 'on', false);
-    var target = k === TV.keys.ok ? pickTarget(p) : null;
+    if (p.moment && k === TV.keys.back) stopAdhan();
+    var target = k === TV.keys.ok && !p.moment ? pickTarget(p) : null;
     if (target) {
       markSeen(p);
       if (lights.length && !movie) toggleMovie();
       launcher(target.app.id, target.app.title, target.params)();
     }
     return true;
+  }
+
+  // MARK: - Ramadan and the Eids: the season's look, Iftar and Eid's moments, and Maghrib's glow all year
+
+  var MAGHRIB_GLOW = 20 * 60000;
+
+  /** A moment over the whole screen, with gold stars rising; any key closes it, and it closes itself. */
+  function moment(title, line) {
+    celebrating = {moment: true};
+    idleAt = Date.now();
+    var box = $('celebrate');
+    box.innerHTML = '';
+    el('div', 'layer dusk', box);
+    for (var i = 0; i < HEARTS; i++) {
+      var h = el('div', 'heart', box, '\u2726');
+      h.style.left = (3 + 94 * i / (HEARTS - 1)) + '%';
+      h.style.fontSize = (24 + (i * 37) % 40) + 'px';
+      h.style.webkitAnimationDelay = h.style.animationDelay = ((i * 7) % HEARTS) * 0.33 + 's';
+    }
+    var text = el('div', 'text center', box);
+    el('div', 'crescent', text).innerHTML = Festive.crescent;
+    el('div', 'big', text, title);
+    if (line) el('div', 'meta', text, line);
+    setClass(box, 'moment', true);
+    setClass(box, 'on', true);
+    celebrateTimer = setTimeout(closeCelebration, 25000);
+  }
+
+  /** Once a day: Iftar in its first ten minutes in Ramadan, and Eid Mubarak the first time the home screen is free. */
+  function festiveMoment(season, today) {
+    if (!screenFree()) return;
+    var now = Date.now(), at = Islam.at('maghrib', new Date(), +Prefs.latitude(), +Prefs.longitude()), key = season + ' ' + today;
+    if (Prefs.moment() === key) return;
+    if (season === 'ramadan' && at && now >= at && now - at < 10 * 60000) {
+      Prefs.set('moment', key);
+      var masjid = Data.salah && Data.salah.masjid;
+      moment(tr('Iftar'), masjid ? trf('{prayer} at {mosque}', {prayer: tr('Maghrib'), mosque: masjid}) : tr('Ramadan'));
+    } else if (season === 'eid' && new Date().getHours() >= 6) {
+      Prefs.set('moment', key);
+      moment(greetingText(), formatDate('format|EEEE, MMMM d', now));
+    }
+  }
+
+  function festive() {
+    if (!(CONFIG.islam && CONFIG.islam.festive) || !Islam.on()) return;
+    var day = new Date(), season = Festive.season(day), at = Islam.at('maghrib', day, +Prefs.latitude(), +Prefs.longitude());
+    Festive.show(season, $('top'), body);
+    setClass(body, 'maghrib', !!at && Date.now() >= at && Date.now() - at < MAGHRIB_GLOW);
+    if (season) festiveMoment(season, day.toDateString());
   }
 
   /** The lights that are on turn pink for a moment, then back as each was. Movie mode's dim room stays dim. */
@@ -2897,6 +2952,7 @@
     Data.sendFilms(voteFilms());
     announceMatches();
     petVisit();
+    festive();
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();

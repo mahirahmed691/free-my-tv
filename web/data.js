@@ -77,6 +77,8 @@ var Prefs = (function () {
     saverWatch: function () { return pick('saverWatch', false) === true; },
     /** Movie night's films you've watched or said you've seen ("movie:123"), newest last. */
     seen: function () { return pick('seen', []); },
+    /** The last full-screen moment shown ("iftar Thu Mar 04 2027"), so each comes once. */
+    moment: function () { return pick('moment', ''); },
     /** Film matches already announced (ids), so a restart doesn't say them again. */
     announced: function () { return pick('announced', []); },
     /** The day the morning briefing last showed ("Thu Oct 29 2026"). */
