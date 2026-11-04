@@ -79,6 +79,8 @@ def read_config(path):
                    'shopping': values.get('shopping', 'false').lower() == 'true',
                    # The cats' mealtimes (a phone's "Fed the cats") and the Met Office's warnings for the region.
                    'fed': values.get('fed', 'false').lower() == 'true',
+                   # Quran together: where each of you is, logged on the same phone links as Film match.
+                   'quran': values.get('quran_together', 'false').lower() == 'true',
                    # Film match: the phones vote on the films this TV can play (make match-links).
                    'match': values.get('film_match', 'false').lower() == 'true',
                    'warnings': values.get('weather_warnings', 'false').lower() == 'true'},

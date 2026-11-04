@@ -597,6 +597,8 @@
         });
       }
     }
+    var read = quranLine(Date.now());
+    if (read) chip(q, 'prayer', tr('Quran'), read);
     var fast = fastLine(Date.now());
     if (fast) chip(q, 'prayer', tr('Sunnah fast'), fast);
     if (kahfDue(Date.now())) chip(q, 'prayer', tr('Sunnah'), tr('Surah Al-Kahf'));
@@ -671,6 +673,15 @@
     if (d.getHours() < 12) return '';
     name = sunnahFast(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
     return name ? trf('{show} tomorrow', {show: name}) : '';
+  }
+
+  /** "Mahir 12/30  ·  Mariam 11/30": in Ramadan, or within 45 days of someone logging a juz. */
+  function quranLine(now) {
+    var people = Data.quran;
+    if (!people.length) return '';
+    var moving = people.some(function (p) { return p.at && now - p.at < 45 * 86400000; });
+    if (!moving && Islam.hijri(new Date(now)).month !== 9) return '';
+    return people.map(function (p) { return p.name + ' ' + p.juz + '/30'; }).join('  ·  ');
   }
 
   /** The Islamic Friday: from Maghrib on Thursday to Maghrib on Friday. */
@@ -2664,6 +2675,21 @@
     }
   }
 
+  /** A khatam gets its moment on the TV, once; what was already finished at the first look stays quiet. */
+  function khatamMoment() {
+    var people = Data.quran;
+    if (!people.length) return;
+    var seen = Prefs.khatams(), next = {}, fresh = null;
+    people.forEach(function (p) {
+      next[p.name] = p.khatam;
+      if (seen && p.khatam > (seen[p.name] || 0) && !fresh) fresh = p;
+    });
+    if (seen && !fresh && JSON.stringify(seen) === JSON.stringify(next)) return;
+    if (fresh && !screenFree()) return;
+    Prefs.set('khatams', next);
+    if (fresh) moment(tr('Khatam'), fresh.name + '  ·  ' + tr('Quran'));
+  }
+
   function festive() {
     if (!(CONFIG.islam && CONFIG.islam.festive) || !Islam.on()) return;
     var day = new Date(), season = Festive.season(day), at = Islam.at('maghrib', day, +Prefs.latitude(), +Prefs.longitude());
@@ -2995,6 +3021,7 @@
     announceMatches();
     petVisit();
     festive();
+    khatamMoment();
     if (lights.length && !saverOn && Date.now() - lightsAt > 60000) refreshLights();
     prayerLights();
     prayerAlert();

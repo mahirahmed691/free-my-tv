@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems, parseWarnings, matchPeople, cleanFilms, bothLike } from '../src/index.js';
+import worker, { pickMatches, watchSites, watchList, parseSalah, localDay, noteSender, listItems, parseWarnings, matchPeople, cleanFilms, bothLike, quranStep } from '../src/index.js';
 
 function kv() {
   const m = new Map();
@@ -636,4 +636,54 @@ test('matchPeople and bothLike', () => {
   assert.deepEqual(matchPeople('Mahir=a, Mariam=b,'), ['Mahir', 'Mariam']);
   assert.deepEqual(bothLike([{ id: 1 }], [[{ id: 1, like: true }]]), []);   // one person is not a match
   assert.deepEqual(bothLike([{ id: 1 }], [[{ id: 1, like: true }], [{ id: 1, like: false }]]), []);
+});
+
+// Quran together
+
+const quranCall = (method, token, body) => worker.fetch(new Request('https://w.example/v1/quran', {
+  method, headers: { Authorization: 'Bearer ' + token }, body: body ? JSON.stringify(body) : undefined,
+}), env);
+
+test('quran: each phone moves only its own count; the TV reads both', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  await quranCall('POST', 'm-key', { step: 1 });
+  await quranCall('POST', 'm-key', { step: 1 });
+  const body = await (await quranCall('POST', 'w-key', { step: 1 })).json();
+  assert.deepEqual(body.people.map((p) => [p.name, p.juz]), [['Mahir', 2], ['Mariam', 1]]);
+  const tv = await (await quranCall('GET', 'secret-token')).json();
+  assert.deepEqual(tv.people.map((p) => p.juz), [2, 1]);
+  assert.equal(tv.me, '');
+});
+
+test('quran: tokens do only their own job', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  env.ADMIN_TOKEN = 'Mahir=admin-key';
+  assert.equal((await quranCall('GET', 'nope')).status, 401);
+  assert.equal((await quranCall('GET', 'admin-key')).status, 401);
+  assert.equal((await quranCall('POST', 'secret-token', { step: 1 })).status, 401);
+  assert.equal((await quranCall('POST', 'm-key', { step: 5 })).status, 400);
+  assert.equal((await quranCall('POST', 'm-key', { reset: 'yes' })).status, 400);
+  assert.equal((await (await quranCall('GET', 'm-key')).json()).people[0].juz, 0);
+});
+
+test('quran: reset keeps the khatams', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  await env.CACHE.put('quran:mahir', JSON.stringify({ juz: 12, khatam: 2 }));
+  const body = await (await quranCall('POST', 'm-key', { reset: true })).json();
+  assert.deepEqual([body.people[0].juz, body.people[0].khatam], [0, 2]);
+});
+
+test('quranStep: the 30th juz is a khatam, and undo takes it back; never below zero', () => {
+  assert.deepEqual(quranStep({ juz: 29, khatam: 0 }, 1), { juz: 0, khatam: 1, finished: true });
+  assert.deepEqual(quranStep({ juz: 0, khatam: 1 }, -1), { juz: 29, khatam: 0 });
+  assert.deepEqual(quranStep({}, -1), { juz: 0, khatam: 0 });
+  assert.deepEqual(quranStep({ juz: 4, khatam: 1 }, 1), { juz: 5, khatam: 1 });
+});
+
+test('quran: the page is inside ALLOWED_IPS and holds no key', async () => {
+  env.MATCH_KEYS = 'Mahir=m-key,Mariam=w-key';
+  const html = await (await get('/quran')).text();
+  assert.ok(!html.includes('m-key'));
+  env.ALLOWED_IPS = '203.0.113.1';
+  assert.equal((await get('/quran', { 'CF-Connecting-IP': '198.51.100.9' })).status, 403);
 });

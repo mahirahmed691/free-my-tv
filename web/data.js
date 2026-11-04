@@ -77,6 +77,8 @@ var Prefs = (function () {
     saverWatch: function () { return pick('saverWatch', false) === true; },
     /** Movie night's films you've watched or said you've seen ("movie:123"), newest last. */
     seen: function () { return pick('seen', []); },
+    /** Khatams already marked, per person ({Mahir: 1}); null until the first look. */
+    khatams: function () { return pick('khatams', null); },
     /** The last full-screen moment shown ("iftar Thu Mar 04 2027"), so each comes once. */
     moment: function () { return pick('moment', ''); },
     /** Film matches already announced (ids), so a restart doesn't say them again. */
@@ -576,6 +578,23 @@ var Data = (function () {
       });
   }
 
+  var quran = [], quranAt = 0, fetchingQuran = false;
+
+  /** Where each of you is in the Quran (the phones log it on the Worker's /quran), every 5 minutes. */
+  function refreshQuran() {
+    var now = Date.now();
+    if (!WORKER.url || !WORKER.quran || fetchingQuran || (now - quranAt < 300000 && now >= quranAt)) return;
+    fetchingQuran = true;
+    workerGet('/v1/quran', function (err, body) {
+      fetchingQuran = false;
+      if (!err && !(body && body.people)) err = new Error((body && body.error) || 'no quran');
+      noteFetch('quran', err);
+      if (err) return;
+      quranAt = Date.now();
+      if (JSON.stringify(body.people) !== JSON.stringify(quran)) { quran = body.people; changed(); }
+    });
+  }
+
   var fed = null, fedAt = 0, fetchingFed = false;
 
   /** When the cats were last fed (a phone's "Fed the cats"), every 2 minutes; only with pets and the Worker. */
@@ -1038,7 +1057,7 @@ var Data = (function () {
     appFor: appFor,
     usable: usable,
     services: services,
-    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshMatches(); refreshDeck(); refreshFed(); refreshWarnings(); refreshEpisodes(); refreshFootball(); refreshCalendar(); refreshSalah(); },
+    refresh: function () { refreshWeather(); refreshPrices(); refreshRecs(); refreshTides(); refreshDashboard(); refreshTrains(); refreshNote(); refreshShopping(); refreshMatches(); refreshDeck(); refreshQuran(); refreshFed(); refreshWarnings(); refreshEpisodes(); refreshFootball(); refreshCalendar(); refreshSalah(); },
     /** Today's events still to come or under way ([{title, start, end, allDay}]), or []. */
     get agenda() {
       var now = Date.now();
@@ -1055,6 +1074,8 @@ var Data = (function () {
     /** Who wrote it (the phone's name on the Worker), or ''. */
     get noteFrom() { return noteFrom; },
     get shopping() { return shopping; },
+    /** Quran together: [{name, juz, khatam, at}]. */
+    get quran() { return quran; },
     /** Films you both liked on your phones and can play here. */
     get filmMatches() {
       var out = [];

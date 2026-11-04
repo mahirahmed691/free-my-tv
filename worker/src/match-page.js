@@ -44,6 +44,7 @@ export function matchPage(nonce) {
   #note button { flex: none; margin-top: 20px; }
   #matches { margin-top: 12px; color: var(--dim); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #matches b { color: var(--love); }
+  #quran { display: block; margin-top: 10px; text-align: center; font-size: 15px; color: var(--dim); }
   #banner { position: fixed; left: 16px; right: 16px; top: max(16px, env(safe-area-inset-top)); z-index: 2; padding: 14px 18px; border-radius: 18px; text-align: center;
     font-weight: 600; color: #fff; background: var(--love); transform: translateY(-160%); transition: transform 0.25s; }
   #banner.on { transform: none; }
@@ -54,12 +55,14 @@ export function matchPage(nonce) {
 <div id="stage"><div id="note"></div></div>
 <div id="buttons"><button id="no" disabled>Not for me</button><button id="yes" disabled>Yes please</button></div>
 <div id="matches"></div>
+<a id="quran">Quran together</a>
 <div id="banner" role="status"></div>
 <script nonce="${nonce}">
 (function () {
   'use strict';
   var key = location.hash.slice(1), stage = document.getElementById('stage'), note = document.getElementById('note');
   var yes = document.getElementById('yes'), no = document.getElementById('no'), left = document.getElementById('left');
+  document.getElementById('quran').href = '/quran#' + key;
   var films = [], known = null, busy = false, card = null, bannerTimer = 0;
 
   function make(tag, cls, parent, text) {

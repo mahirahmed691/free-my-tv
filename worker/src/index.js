@@ -1,5 +1,6 @@
 import { eventsBetween, dayBounds } from './ics.js';
 import { matchPage } from './match-page.js';
+import { quranPage } from './quran-page.js';
 
 /**
  * The TV's backend: holds the API keys (Wrangler secrets), calls the sources, and gives the TV small JSON. The TV
@@ -17,6 +18,8 @@ import { matchPage } from './match-page.js';
  *   GET /match          Film match's page for the phones (the key stays in the link's #fragment; only from ALLOWED_IPS)
  *   GET /v1/match       the TV: what you both like; a phone (MATCH_KEYS): the films left to vote on, and the same
  *                       POST {"films"} (the TV: what it can play) or {"id", "like"} (a phone); DELETE: a phone votes again
+ *   GET /quran          Quran together's page, on the same links as Film match
+ *   GET /v1/quran       where each of you is (the TV and the phones); POST {"step": 1 or -1} or {"reset": true} (a phone)
  *   GET /v1/warnings    the Met Office's weather warnings for WARNINGS_REGION (nw: North West England; 10 min cache)
  *   GET /v1/football    FOOTBALL_TEAM's live match, next fixture and last result (football-data.org, 5 min cache)
  *   GET /v1/calendar    today's events from CALENDAR_ICS (a calendar's secret iCal address; 10 min cache)
@@ -29,7 +32,7 @@ import { matchPage } from './match-page.js';
  * Every 15 minutes (cron) it also checks WATCH_SITES ("Name=https://url|..."), and the GitHub card counts them with the
  * monitoring Workers' sites.
  *
- * MATCH_KEYS ("Name=key,Name=key", make match-links) may only vote: its keys travel in links.
+ * MATCH_KEYS ("Name=key,Name=key", make match-links) may only vote and log their own Quran: its keys travel in links.
  * Secrets: TV_TOKEN, ADMIN_TOKEN (writes the note, one per device, comma separated, "Name=token" to sign it; never on the TV), UKHO_KEY, GITHUB_TOKEN (fine-grained, read-only),
  * FOOTBALL_KEY (football-data.org), SALAH_WIDGET (the mosque's widget address, with its token), CALENDAR_ICS (the calendar's secret iCal address: anyone with it reads the calendar). Vars: STATIONS ("0451:Mersey,0461:Dee"), ALLOWED_IPS (addresses or CIDR ranges, comma
  * separated; empty = any), GITHUB_RECENT (how many recently pushed repos, 6).
@@ -575,10 +578,48 @@ async function filmMatch(request, env) {
   return json({ me, matches, left, total: deck.films.length });
 }
 
+// MARK: Quran together (each of you logs a juz on your phone; the TV shows both)
+
+const JUZ = 30;
+const quranKey = (name) => 'quran:' + name.toLowerCase();
+
+/** One step along the 30 juz: the last turns into a khatam, and undoing right after takes it back. */
+export function quranStep(state, step) {
+  const s = { juz: state.juz || 0, khatam: state.khatam || 0 };
+  if (step > 0 && s.juz + 1 >= JUZ) return { juz: 0, khatam: s.khatam + 1, finished: true };
+  if (step > 0) return { ...s, juz: s.juz + 1 };
+  if (s.juz > 0) return { ...s, juz: s.juz - 1 };
+  return s.khatam > 0 ? { juz: JUZ - 1, khatam: s.khatam - 1 } : s;
+}
+
+async function quran(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const me = noteSender(env.MATCH_KEYS, auth);
+  const tv = env.TV_TOKEN && sameSecret(auth, 'Bearer ' + env.TV_TOKEN);
+  if (!me && !tv) return json({ error: 'token' }, 401);
+  let finished = false;
+  if (request.method === 'POST') {
+    if (!me) return json({ error: 'a phone logs' }, 401);
+    let body;
+    try { body = await request.json(); } catch { return json({ error: 'JSON body' }, 400); }
+    const was = (await env.CACHE.get(quranKey(me), 'json')) || {};
+    const step = body && body.step;
+    if (step !== 1 && step !== -1 && !(body && body.reset === true)) return json({ error: 'step 1 or -1, or reset' }, 400);
+    const next = body.reset ? { juz: 0, khatam: was.khatam || 0 } : quranStep(was, step);
+    finished = !!next.finished;
+    await env.CACHE.put(quranKey(me), JSON.stringify({ juz: next.juz, khatam: next.khatam, at: Date.now() }));
+  }
+  const people = await Promise.all(matchPeople(env.MATCH_KEYS).map(async (name) => {
+    const p = (await env.CACHE.get(quranKey(name), 'json')) || {};
+    return { name, juz: p.juz || 0, khatam: p.khatam || 0, at: p.at || 0 };
+  }));
+  return json({ me: me || '', people, finished });
+}
+
 /** A nonce for each answer, so the page's script runs and nothing else could. */
-function filmMatchPage() {
+function phonePage(page) {
   const nonce = crypto.randomUUID();
-  return new Response(matchPage(nonce), {
+  return new Response(page(nonce), {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
@@ -708,16 +749,18 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const writes = request.method === 'POST' || request.method === 'DELETE';
     const writesNote = path === '/v1/notes' && writes;
-    if (request.method !== 'GET' && !writesNote && !((path === '/v1/list' || path === '/v1/fed' || path === '/v1/match') && writes)) return json({ error: 'GET only' }, 405);
+    if (request.method !== 'GET' && !writesNote && !((path === '/v1/list' || path === '/v1/fed' || path === '/v1/match' || path === '/v1/quran') && writes)) return json({ error: 'GET only' }, 405);
     if (!allowedIp(request, env)) return json({ error: 'not from an allowed address' }, 403);
     if (path === '/health') return json(await health(env));
-    if (path === '/match') return filmMatchPage();
+    if (path === '/match') return phonePage(matchPage);
+    if (path === '/quran') return phonePage(quranPage);
     if (path === '/webos/apps.json' || path === '/webos/FreeMyTV.ipk') return homebrew(path, env);
 
     if (writesNote) return notes(request, env);
     if (path === '/v1/list') return shopping(request, env);
     if (path === '/v1/fed') return fed(request, env);
     if (path === '/v1/match') return filmMatch(request, env);
+    if (path === '/v1/quran') return quran(request, env);
     const auth = request.headers.get('Authorization') || '';
     if (!env.TV_TOKEN || !sameSecret(auth, 'Bearer ' + env.TV_TOKEN)) return json({ error: 'token' }, 401);
     try {
